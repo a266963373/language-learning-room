@@ -1,0 +1,53 @@
+name: Publish multilingual travel app
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Verify public release and isolate site files
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, shutil
+          source=pathlib.Path('.').resolve()
+          destination=source/'_site'
+          release=json.loads((source/'release.json').read_text())
+          assert release['format']=='language-room-multi-offline'
+          allowed=json.loads((source/'publish-allowlist.json').read_text())
+          indexed={row['path']:row for row in release['shell']+release['audio']}
+          assert set(allowed)==set(indexed)|{'release.json','service-worker.js','.nojekyll'}
+          for relative in allowed:
+              file=(source/relative).resolve()
+              assert file.is_relative_to(source) and not any(part in {'.git','server','data','recordings'} for part in pathlib.Path(relative).parts)
+              if relative in indexed:
+                  data=file.read_bytes(); row=indexed[relative]
+                  assert len(data)==row['bytes'] and hashlib.sha256(data).hexdigest()==row['sha256']
+              target=destination/relative
+              target.parent.mkdir(parents=True,exist_ok=True)
+              shutil.copyfile(file,target)
+          print('Verified',release['version'],len(allowed),'public files')
+          PY
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f6f2">
+  <title>Language room</title>
+  <script src="./theme.js"></script>
+  <link rel="stylesheet" href="./style.css">
+<link rel="manifest" href="./manifest.webmanifest"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="apple-touch-icon" href="./icon-192.png"><link rel="stylesheet" href="./offline.css"></head>
+<body>
+  <div class="app-shell" hidden>
+    <header class="topbar">
+      <a class="brand" href="./">language<span>room</span><span class="brand-dot" aria-hidden="true">·</span></a>
+      <div class="top-actions">
+        <label class="sr-only" for="language">Learning language</label>
+        <select id="language" aria-label="Learning language" disabled></select>
+        <button id="theme-toggle" class="quiet" type="button" aria-label="Switch to dark skin" aria-pressed="false" aria-keyshortcuts="Control+Shift+L" title="Switch to dark skin · Ctrl+Shift+L">Dark</button>
+        <button id="settings-button" class="quiet" type="button">Settings & content</button>
+      </div>
+    </header>
+    <main>
+      <div id="notice" class="notice" role="status" hidden></div>
+      <section id="practice" class="practice" aria-label="Current practice" aria-busy="true">
+        <div class="loading">Opening your place…</div>
+      </section>
+      <div class="undo-controls"><button id="undo-button" class="text-button" type="button" disabled>撤销上一评分</button></div>
+      <div id="shortcut-hint" class="shortcut-hint"></div>
+      <div class="learning-tools">
+        <nav id="stages" class="stages" aria-label="Practice type"></nav>
+        <div id="recent-controls" class="undo-controls" hidden><button id="recent-paragraph-toggle" class="text-button" type="button">词汇小段落</button><button id="paragraph-generate" class="text-button" type="button" hidden>换个情境</button><button id="recent-toggle" class="text-button" type="button">近期词短句</button></div>
+        <section class="progress-strip" aria-label="Learning progress">
+          <div class="progress-group"><span id="today-label">Today</span><strong id="daily-count">—</strong><progress id="daily-bar" max="20" value="0" aria-label="Today’s tasks"></progress></div>
+        </section>
+        <section id="vocabulary-panel" class="vocabulary-panel" aria-label="词汇量（当前课程内）">
+          <div class="vocabulary-summary"><span id="vocabulary-heading">词汇量（当前课程内）</span><strong id="vocabulary-estimate" role="status">待估计</strong></div>
+          <p id="vocabulary-recalled"></p>
+          <p id="vocabulary-range" class="panel-note"></p>
+          <progress id="assessment-progress" max="36" value="0" aria-label="本轮测量进度" hidden></progress>
+          <div class="assessment-controls"><button id="assessment-start" class="text-button" type="button" hidden>校准词汇量</button><button id="assessment-return" class="text-button" type="button" hidden>返回练习</button></div>
+          <details id="vocabulary-details" hidden><summary id="vocabulary-detail-label">估计说明</summary><p id="vocabulary-detail-text"></p></details>
+        </section>
+      </div>
+    </main>
+    <footer><span id="footer-label">A little, every day.</span><button id="help-button" class="text-button" type="button">Keys & help</button></footer>
+  </div>
+  <dialog id="settings-dialog" class="settings-dialog">
+    <div class="panel-heading"><h2 id="settings-title">Settings & content</h2><button class="close-panel" type="button" data-close="settings-dialog" aria-label="Close">×</button></div>
+    <div id="settings-body"></div>
+  </dialog>
+  <dialog id="help-dialog" class="help-dialog">
+    <div class="panel-heading"><h2 id="help-title">Keys & help</h2><button class="close-panel" type="button" data-close="help-dialog" aria-label="Close">×</button></div>
+    <div id="help-body"></div>
+  </dialog>
+  <aside id="dictionary" class="dictionary" aria-label="Word details" hidden>
+    <div class="panel-heading"><h2 id="dictionary-title">Word details</h2><button id="dictionary-close" class="close-panel" type="button" aria-label="Close word details">×</button></div>
+    <div id="dictionary-body"></div>
+  </aside>
+  <audio id="lesson-audio" preload="auto"></audio>
+  <script type="module" src="./boot.js"></script>
+</body>
+</html>

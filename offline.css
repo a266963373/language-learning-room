@@ -1,0 +1,14 @@
+.installer { width:min(560px,100%); margin:8vh auto; padding:24px; }
+.installer h1 { font-size:30px; line-height:1.3; }
+.installer p { line-height:1.7; }
+.installer progress { width:100%; height:12px; margin:18px 0; }
+.installer button { min-height:48px; margin:10px 8px 0 0; }
+.offline-controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:12px 0; border-bottom:1px solid var(--line); }
+.offline-controls small { color:var(--muted); flex:1 0 100%; line-height:1.5; }
+.offline-controls button { min-height:44px; }
+.offline-status { color:var(--muted); font-size:13px; padding:10px 0; }
+.refresh-controls, #job-status { display:none !important; }
+#language { display:block; }
+@media (max-width:650px) { button,select { min-height:44px; } input,select,textarea { font-size:16px !important; } .app-shell { padding-left:max(14px,env(safe-area-inset-left)); padding-right:max(14px,env(safe-area-inset-right)); padding-bottom:env(safe-area-inset-bottom); } .top-actions { flex-wrap:wrap; } .ratings .rating { min-height:56px; } .helper-selects { flex-wrap:wrap; } }
+
+#sync-login{display:flex;flex-wrap:wrap;gap:8px;width:100%} #sync-login label{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1 1 180px} #sync-login input{max-width:100%;min-height:44px;font-size:16px} #sync-conflict{width:100%} .offline-controls>div:first-child{width:100%}
