@@ -4,6 +4,20 @@ import { mergeProgress, SyncConflict } from './sync-merge.js';
 const AUTH_KEY='multi-offline-auth';
 const equal=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
 const parse=value=>{try{return JSON.parse(value);}catch{return null;}};
+async function pack(payload) {
+  if(!globalThis.CompressionStream||!globalThis.DecompressionStream)return payload;
+  const bytes=new Uint8Array(await new Response(new Blob([JSON.stringify(payload)]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+  let text='';for(let offset=0;offset<bytes.length;offset+=16384)text+=String.fromCharCode(...bytes.subarray(offset,offset+16384));
+  return {format:payload.format,version:1,state:{},encoding:'gzip-base64',packed:btoa(text)};
+}
+async function unpack(payload) {
+  if(payload?.encoding!=='gzip-base64')return payload;
+  if(!globalThis.DecompressionStream)throw new Error('请升级浏览器后同步；本机进度已保留。');
+  if(typeof payload.packed!=='string'||payload.packed.length>64*1024*1024)throw new Error('云端存档大小无效。');
+  const input=Uint8Array.from(atob(payload.packed),char=>char.charCodeAt(0)),reader=new Blob([input]).stream().pipeThrough(new DecompressionStream('gzip')).getReader(),chunks=[];let length=0;
+  try{while(true){const {value,done}=await reader.read();if(done)break;length+=value.length;if(length>64*1024*1024)throw new Error('解压后的存档超过64MB，未覆盖本机。');chunks.push(value);}}finally{await reader.cancel().catch(()=>{});}
+  return JSON.parse(await new Blob(chunks).text());
+}
 export class SupabaseSync {
   constructor(engine,config,{fetcher=globalThis.fetch.bind(globalThis),storage=localStorage,onStatus=()=>{},onApply=()=>{},canApply=()=>true}={}) {
     this.engine=engine;this.config=config;this.fetcher=fetcher;this.storage=storage;this.onStatus=onStatus;this.onApply=onApply;this.canApply=canApply;
@@ -11,6 +25,12 @@ export class SupabaseSync {
     if(config?.url&&config?.publishableKey){const url=new URL(config.url);if(url.protocol!=='https:'||!url.hostname.endsWith('.supabase.co')||url.pathname!=='/')throw new Error('同步服务地址无效。');const key=config.publishableKey;if(key.startsWith('sb_secret_')||key.startsWith('ey')&&parse(atob(key.split('.')[1].replaceAll('-','+').replaceAll('_','/')))?.role!=='anon')throw new Error('浏览器只能使用公开密钥。');this.configured=true;this.origin=url.origin;}
   }
   status(text,kind='normal'){this.onStatus(text,kind);}
+  async remote(baseline) {
+    const headers={'Content-Type':'application/json'},head=await this.request('/rest/v1/rpc/travel_head',{headers,body:{}});
+    if(baseline&&head.revision===baseline.revision)return {revision:head.revision,payload:baseline.payload};
+    const remote=await this.request('/rest/v1/rpc/travel_read',{headers,body:{}});remote.payload=await unpack(remote.payload);return remote;
+  }
+  async writeRemote(revision,payload){return this.request('/rest/v1/rpc/travel_write',{headers:{'Content-Type':'application/json'},body:{expected_revision:revision,new_payload:await pack(payload)}});}
   async meta(key,value) {
     const db=this.engine.store.db,write=value!==undefined,tx=db.transaction('state',write?'readwrite':'readonly'),table=tx.objectStore('state');let result;
     const request=write?table.put(value,key):table.get(key);request.onsuccess=()=>{result=request.result;};
@@ -75,7 +95,7 @@ export class SupabaseSync {
     const uid=this.auth.user.id,owner=await this.meta('sync-owner');if(owner&&owner!==uid)throw new Error('同步账号与本机进度所属账号不一致。');
     let baseline=await this.meta(`sync-base:${uid}`);
     for(let attempt=0;attempt<3;attempt++) {
-      const local=await this.snapshot(),remote=await this.request('/rest/v1/rpc/travel_read',{headers:{'Content-Type':'application/json'},body:{}});
+      const local=await this.snapshot(),remote=await this.remote(baseline);
       if(remote.payload)this.validate(remote.payload);
       let merged;
       if(!remote.payload)merged=local;
@@ -92,7 +112,7 @@ export class SupabaseSync {
         // First save any remote-only blobs locally without replacing the state.
         if(recordings){const tx=this.engine.store.db.transaction('recordings','readwrite');for(const row of recordings)tx.objectStore('recordings').put(row.blob,row.id);await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});}
         await this.uploadRecordings(merged,remote.payload);
-        const response=await this.request('/rest/v1/rpc/travel_write',{headers:{'Content-Type':'application/json'},body:{expected_revision:remote.revision,new_payload:merged}});
+        const response=await this.writeRemote(remote.revision,merged);
         if(response.conflict)continue;revision=response.revision;
       }
       const changed=!equal(local,merged);
@@ -113,10 +133,10 @@ export class SupabaseSync {
     return new Blob([JSON.stringify({...normalize(payload,this.engine.base),format:'language-room-multi-backup',version:1,exportedAt:new Date().toISOString(),recordings:rows})],{type:'application/json'});
   }
   resolve(which) {return this.run(async()=>{
-    if(!this.conflict)throw new Error('冲突已处理。');const fresh=await this.request('/rest/v1/rpc/travel_read',{headers:{'Content-Type':'application/json'},body:{}});if(fresh.revision!==this.conflict.remote.revision){this.conflict=null;return this.syncLocked();}
+    if(!this.conflict)throw new Error('冲突已处理。');const fresh=await this.remote();if(fresh.revision!==this.conflict.remote.revision){this.conflict=null;return this.syncLocked();}
     const local=await this.snapshot();if(!equal(local,this.conflict.local)){this.conflict=null;return this.syncLocked();}
     const payload=which==='local'?local:this.conflict.remote.payload,recordings=await this.downloadRecordings(payload);let revision=fresh.revision;
-    if(which==='local'){await this.uploadRecordings(payload,fresh.payload);const result=await this.request('/rest/v1/rpc/travel_write',{headers:{'Content-Type':'application/json'},body:{expected_revision:revision,new_payload:payload}});if(result.conflict){this.conflict=null;return this.syncLocked();}revision=result.revision;}else await this.apply(payload,recordings);
+    if(which==='local'){await this.uploadRecordings(payload,fresh.payload);const result=await this.writeRemote(revision,payload);if(result.conflict){this.conflict=null;return this.syncLocked();}revision=result.revision;}else await this.apply(payload,recordings);
     await this.meta(`sync-base:${this.auth.user.id}`,{revision,payload});this.conflict=null;this.status('已同步选择的进度','synced');if(which!=='local')this.onApply();
   });}
 }

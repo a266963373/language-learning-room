@@ -21,6 +21,14 @@
     </header>
     <main>
       <div id="notice" class="notice" role="status" hidden></div>
+      <section id="recent-controls" class="review-controls" aria-label="词汇复习" hidden>
+        <p id="review-controls-label">用已学词复习</p>
+        <div class="review-mode-buttons">
+          <button id="recent-paragraph-toggle" class="review-mode" type="button" aria-pressed="false"><strong>熟词小段落</strong><span>用几个复习词串成短情境</span></button>
+          <button id="recent-toggle" class="review-mode" type="button" aria-pressed="false"><strong>熟词短句</strong><span>只选背景词已熟悉的句子</span></button>
+        </div>
+        <div class="review-secondary"><button id="review-return" type="button" hidden>返回普通输入</button><button id="paragraph-generate" type="button" hidden>换一段</button></div>
+      </section>
       <section id="practice" class="practice" aria-label="Current practice" aria-busy="true">
         <div class="loading">Opening your place…</div>
       </section>
@@ -28,7 +36,6 @@
       <div id="shortcut-hint" class="shortcut-hint"></div>
       <div class="learning-tools">
         <nav id="stages" class="stages" aria-label="Practice type"></nav>
-        <div id="recent-controls" class="undo-controls" hidden><button id="recent-paragraph-toggle" class="text-button" type="button">词汇小段落</button><button id="paragraph-generate" class="text-button" type="button" hidden>换个情境</button><button id="recent-toggle" class="text-button" type="button">近期词短句</button></div>
         <section class="progress-strip" aria-label="Learning progress">
           <div class="progress-group"><span id="today-label">Today</span><strong id="daily-count">—</strong><progress id="daily-bar" max="20" value="0" aria-label="Today’s tasks"></progress></div>
         </section>

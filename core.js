@@ -81,6 +81,19 @@ export function sentenceParts(sentence, entryId, display) {
   return parts;
 }
 
+export function reviewSentenceParts(text,targets,languageId){
+  const ranges=[];
+  for(const target of targets??[]){
+    const surface=target.surface??target.display;if(!surface)continue;
+    const escaped=surface.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const boundary=['ja','ko','ar'].includes(languageId)?'':'(?<![\\p{L}\\p{N}\\p{M}])',after=boundary?'(?![\\p{L}\\p{N}\\p{M}])':'';
+    for(const match of text.matchAll(new RegExp(boundary+escaped+after,'giu')))ranges.push({start:match.index,end:match.index+match[0].length,entryId:target.entryId});
+  }
+  ranges.sort((a,b)=>a.start-b.start||b.end-a.end);const parts=[];let cursor=0;
+  for(const range of ranges){if(range.start<cursor)continue;if(range.start>cursor)parts.push({text:text.slice(cursor,range.start)});parts.push({text:text.slice(range.start,range.end),entryId:range.entryId,reviewTarget:true});cursor=range.end;}
+  if(cursor<text.length)parts.push({text:text.slice(cursor)});return parts;
+}
+
 export async function request(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { ...(options.body && typeof options.body === 'string' ? { 'Content-Type': 'application/json' } : {}), ...options.headers } });
   const data = await response.json().catch(() => ({}));

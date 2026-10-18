@@ -1,4 +1,4 @@
-import { languageNames, shortcutAction, translation, progressValues, vocabularyValues, assessmentCanStart, escapeHTML as esc, sentenceParts, request } from './core.js';
+import { languageNames, shortcutAction, translation, progressValues, vocabularyValues, assessmentCanStart, escapeHTML as esc, sentenceParts, reviewSentenceParts, request } from './core.js';
 import { helperLanguages, helperTranslations } from './helper-languages.js';
 import { japaneseMarkup } from './japanese-readings.js';
 import { hindiTransliteration } from './hindi-transliteration.js';
@@ -55,9 +55,9 @@ function setBusy(value) {
   renderUndo();
   for(const id of ['assessment-start','assessment-return'])if($('#'+id))$('#'+id).disabled=value||(id==='assessment-start'&&!assessmentCanStart(session?.progress?.vocabulary))||recordSaving||recordOpening||recorder?.state==='recording';
   $('#language').disabled = value;
-  document.querySelectorAll('.stage-button, .rating, #reveal, #record, #finish-writing, #practice-retry, #recognition-mode, #input-mode').forEach(button => { button.disabled = value || (button.id === 'record' && (recordSaving || recordOpening)) || (button.classList.contains('stage-button') && !(currentLanguage()?.availableStages || [1, 2, 3, 4]).includes(Number(button.dataset.stage))); });
+  document.querySelectorAll('.stage-button, .rating, #reveal, #record, #finish-writing, #practice-retry, #review-word-practice, #recognition-mode, #input-mode').forEach(button => { button.disabled = value || (button.id === 'record' && (recordSaving || recordOpening)) || (button.classList.contains('stage-button') && !(currentLanguage()?.availableStages || [1, 2, 3, 4]).includes(Number(button.dataset.stage))); });
   if ((Number(task()?.stage) === 1 || session?.purpose === 'recent-words') && !audioHeard) document.querySelectorAll('#reveal, .rating').forEach(button => { button.disabled = true; });
-  for (const id of ['recent-toggle','recent-paragraph-toggle','paragraph-generate']) if ($('#'+id)) $('#'+id).disabled = value || recordSaving || recordOpening || recorder?.state === 'recording';
+  for (const id of ['recent-toggle','recent-paragraph-toggle','paragraph-generate','review-return']) if ($('#'+id)) $('#'+id).disabled = value || recordSaving || recordOpening || recorder?.state === 'recording';
 }
 
 function currentLanguage() { return catalog?.languages?.find(language => language.id === state?.selectedLanguage); }
@@ -141,11 +141,26 @@ function translatedMarkup(values, field = 'meanings', provenance = task()?.helpe
 
 function sentenceMarkup(sentence) {
   let offset=0;
-  return sentenceParts(sentence, task()?.entryId, task()?.display).map(part=>{
+  const parts=['recent-words','recent-paragraphs'].includes(task()?.purpose)?reviewSentenceParts(sentence?.text??'',task()?.recentTargets,state.selectedLanguage):sentenceParts(sentence, task()?.entryId, task()?.display);
+  return parts.map(part=>{
     const begin=offset;offset+=part.text.length;
     const text=state.selectedLanguage==='ja' && revealed?japaneseMarkup(sentence.text,task()?.japaneseReadings,begin,offset):isArabic()?esc(arabicDisplay(part.text,state?.preferences?.arabicDiacritics===true)):esc(part.text);
-    return part.entryId?`<button type="button" class="word-link" data-entry="${esc(part.entryId)}">${text}</button>`:text;
+    return part.entryId?`<button type="button" class="${part.reviewTarget?'review-target-highlight':'word-link'}" data-entry="${esc(part.entryId)}" ${part.reviewTarget?`aria-label="${esc(uiLanguage==='zh'?'复习词：':'Review word: ')}${esc(part.text)}"`:''}>${text}</button>`:text;
   }).join('') + (isArabic() ? arabicTransliteration(sentence?.text || '', task()?.transliterations, state.preferences.arabicTransliteration===true) : state.selectedLanguage === 'hi' ? hindiTransliteration(sentence?.text || '', task()?.transliterations, state.preferences.hindiTransliteration !== false) : '');
+}
+
+function reviewTargetsMarkup(targets,empty=false){
+  if(!targets?.length)return'';
+  return `<section class="review-targets${empty?' review-empty-targets':''}" aria-label="${esc(uiLanguage==='zh'?'本次复习词':'Review words')}"><p>${esc(uiLanguage==='zh'?(empty?'这些词值得先复习 · 点击可查词义':'本次复习词 · 正文中已高亮，点击可查词义'):(empty?'Words to review first · tap for meaning':'Review words · highlighted in the text; tap for meaning'))}</p><div class="review-target-list">${targets.map(word=>{
+    const recent=word.firstLearnedAt&&Date.now()-Date.parse(word.firstLearnedAt)<14*86400000;
+    const label=word.reason==='reinforce'?(uiLanguage==='zh'?'易忘 · 巩固':'Reinforce'):(uiLanguage==='zh'?(recent?'近期学过':'已学过'):(recent?'Recently learned':'Learned before'));
+    const date=word.firstLearnedAt?new Intl.DateTimeFormat(uiLanguage==='zh'?'zh-CN':'en-US',{month:'numeric',day:'numeric'}).format(new Date(word.firstLearnedAt)):'';
+    return `<button type="button" class="review-target-chip" data-entry="${esc(word.entryId)}"><strong lang="${esc(state.selectedLanguage)}">${esc(word.display)}</strong><small>${esc(label)}${date?' · '+esc(date):''}</small></button>`;
+  }).join('')}</div></section>`;
+}
+function reviewSupportMarkup(item){
+  const support=item.reviewReadability?.supportWords??[];if(!support.length)return'';
+  return `<aside class="review-support"><p>${esc(uiLanguage==='zh'?'仅这一个背景词需要提示：':'One background word to help you read:')}</p>${support.map(word=>`<p><strong>${esc(word.text)}</strong> — ${esc(taskHelpers().map(id=>word.meanings?.[id]).filter(Boolean).join(' / ')||word.meanings?.en||'')}</p>`).join('')}</aside>`;
 }
 
 function hanjaMarkup(item=task()) {
@@ -173,25 +188,26 @@ function correctOptionIndex() {
 }
 
 function renderPractice() {
+  $('#practice').classList.toggle('review-practice',['recent-words','recent-paragraphs'].includes(session?.purpose));
   if ($('#recent-controls')) {
     $('#recent-controls').hidden = state?.selectedStage !== 3 || session?.purpose === 'assessment';
-    $('#recent-toggle').textContent = session?.purpose === 'recent-words'
-      ? (uiLanguage === 'zh' ? '返回普通输入' : 'Return to regular input')
-      : (uiLanguage === 'zh' ? '近期词短句' : 'Recent-word sentences');
+    $('#review-controls-label').textContent=uiLanguage==='zh'?'用已学词复习':'Review learned words';
+    $('#recent-toggle').innerHTML=uiLanguage==='zh'?'<strong>熟词短句</strong><span>只选背景词已熟悉的句子</span>':'<strong>Familiar-word sentences</strong><span>Sentences with familiar background words</span>';
+    $('#recent-toggle').setAttribute('aria-pressed',String(session?.purpose==='recent-words'));
     if ($('#paragraph-generate')) {$('#paragraph-generate').hidden=session?.purpose!=='recent-paragraphs'||!catalog?.providers?.paragraphGeneration?.available;$('#paragraph-generate').textContent=uiLanguage==='zh'?(task()?'换个情境':'生成小段落'):(task()?'New situation':'Generate a passage');}
-    if ($('#recent-paragraph-toggle')) $('#recent-paragraph-toggle').textContent = session?.purpose === 'recent-paragraphs'
-      ? (uiLanguage === 'zh' ? '返回普通输入' : 'Return to regular input')
-      : (uiLanguage === 'zh' ? '词汇小段落' : 'Vocabulary passages');
+    $('#recent-paragraph-toggle').innerHTML=uiLanguage==='zh'?'<strong>熟词小段落</strong><span>用几个复习词串成短情境</span>':'<strong>Familiar-word passages</strong><span>A short situation using your review words</span>';
+    $('#recent-paragraph-toggle').setAttribute('aria-pressed',String(session?.purpose==='recent-paragraphs'));
+    $('#review-return').hidden=!['recent-words','recent-paragraphs'].includes(session?.purpose);$('#review-return').textContent=uiLanguage==='zh'?'返回普通输入':'Return to regular input';
   }
   const item = task();
   const previousScroll = $('#practice').dataset.taskId === item?.id ? $('#practice .card-center')?.scrollTop || 0 : 0;
   $('#practice').dataset.taskId = item?.id || '';
   if (!item && session?.purpose === 'recent-paragraphs') {
-    $('#practice').innerHTML = `<div class="empty"><p>${esc(session?.generation?.message || (uiLanguage === 'zh' ? '积累至少两个词的词义回忆记录，就能生成适合你的小段落。' : 'Build meaning-recall evidence for at least two words to generate a passage.'))}</p><button type="button" id="practice-retry">${esc(t('retry'))}</button></div>`;
+    $('#practice').innerHTML = `<div class="empty"><p>${esc(session?.generation?.message || (uiLanguage === 'zh' ? '暂时没有背景词足够熟悉的小段落。不会为了串词，塞入一大批生词。' : 'No passage with sufficiently familiar background words is ready.'))}</p>${reviewTargetsMarkup(session.suggestedTargets,true)}<button type="button" class="review-word-practice" id="review-word-practice">${esc(uiLanguage==='zh'?'先复习单词':'Review words first')}</button></div>`;
     setBusy(busy); return;
   }
   if (!item && session?.purpose === 'recent-words') {
-    $('#practice').innerHTML = `<div class="empty"><p>${esc(uiLanguage === 'zh' ? '暂时没有匹配的已配音短句，或本轮已练完。先继续词义练习，之后再来试试。' : 'No matching voiced sentences are ready, or this round is complete. Continue vocabulary practice and try again later.')}</p><button type="button" id="practice-retry">${esc(t('retry'))}</button></div>`;
+    $('#practice').innerHTML = `<div class="empty"><p>${esc(uiLanguage === 'zh' ? '暂时没有背景词全部熟悉的短句，或本轮已练完。已排除生词过多的句子，可以先复习这些词。' : 'No sentence with fully familiar background words is ready, or this round is complete. Review these words first.')}</p>${reviewTargetsMarkup(session.suggestedTargets,true)}<button type="button" class="review-word-practice" id="review-word-practice">${esc(uiLanguage==='zh'?'先复习单词':'Review words first')}</button></div>`;
     setBusy(busy); return;
   }
   if (!item && session?.purpose==='assessment') {$('#practice').innerHTML=`<div class="empty"><p>${esc(uiLanguage==='zh'?'这组抽测已完成。可继续校准，或返回原练习。':'This group is complete. Continue calibration or return to practice.')}</p></div>`;setBusy(busy);return;}
@@ -212,8 +228,8 @@ function renderPractice() {
     if (revealed) answer = `<div class="answer">${reverse ? `${targetWithHanja(`<p class="target-text" lang="${esc(state.selectedLanguage)}" dir="${direction}">${targetMarkup(item.display)}</p>`)}${audioMarkup('word')}` : translatedMarkup(item.meanings)}</div>`;
   } else if (stage === 3) {
     meta = `<select id="input-mode" aria-label="Input display"><option value="together" ${!listenFirst ? 'selected' : ''}>${esc(t('together'))}</option><option value="listen" ${listenFirst ? 'selected' : ''}>${esc(t('listenFirst'))}</option></select>`;
-    center = (!listenFirst || revealed ? targetWithHanja(`<h1 class="target-text sentence-text ${item.generatedParagraph?'paragraph-text':''}" lang="${esc(state.selectedLanguage)}" dir="${direction}">${sentenceMarkup(item.sentence)}</h1>`) : '') + audioMarkup('sentence');
-    if (revealed) answer = `<div class="answer">${translatedMarkup(item.sentence?.meanings || item.meanings, item.sentence?.meanings ? 'sentence' : 'meanings')}${item.recentTargets?.length ? `<p class="panel-note">${esc(uiLanguage === 'zh' ? '关联词：' : 'Related words: ')}${item.recentTargets.map(word => `<button type="button" class="word-link" data-entry="${esc(word.entryId)}">${esc(word.display)}${word.reason==='reinforce'?esc(uiLanguage==='zh'?'（巩固）':' (reinforce)'):''}</button>`).join(' · ')}</p>` : ''}${['recent-words','recent-paragraphs'].includes(item.purpose) ? `<p class="panel-note">${esc(item.generatedParagraph ? (uiLanguage === 'zh' ? 'AI原创 · 自评整段理解。' : 'AI-authored · rate understanding of the paragraph.') : (uiLanguage === 'zh' ? '按词形匹配；自评整句理解。' : 'Matched by word form; rate understanding of the sentence.'))}</p>` : ''}</div>`;
+    center = reviewTargetsMarkup(item.recentTargets)+reviewSupportMarkup(item)+(!listenFirst || revealed || item.recentTargets?.length ? targetWithHanja(`<h1 class="target-text sentence-text ${item.generatedParagraph?'paragraph-text':''}" lang="${esc(state.selectedLanguage)}" dir="${direction}">${sentenceMarkup(item.sentence)}</h1>`) : '') + audioMarkup('sentence');
+    if (revealed) answer = `<div class="answer">${translatedMarkup(item.sentence?.meanings || item.meanings, item.sentence?.meanings ? 'sentence' : 'meanings')}${['recent-words','recent-paragraphs'].includes(item.purpose) ? `<p class="panel-note">${esc(uiLanguage==='zh'?'只评价这段内容是否读懂，不会把出现过的词自动算作掌握。':'Rate your understanding; words are not automatically marked as learned.')}</p>` : ''}</div>`;
   } else {
     const prompt = typeof item.prompt === 'object' ? translation(item.prompt, taskHelper()) : { text: item.prompt || '', language: item.promptLanguage || 'und' };
     center = `${translatedMarkup(item.prompts || (typeof item.prompt === 'object' ? item.prompt : { [prompt.language]: prompt.text }), 'prompts')}<div class="output-response"><label class="sr-only" for="response">${esc(t('response'))}</label><textarea id="response" maxlength="10000" placeholder="${esc(t('responsePlaceholder'))}" lang="${esc(state.selectedLanguage)}" dir="${direction}">${esc(responseText)}</textarea><div class="output-tools"><button type="button" id="record" ${recordSaving ? 'disabled' : ''}>${esc(recorder?.state === 'recording' ? t('stop') : t('record'))}</button><button type="button" id="finish-writing">${esc(t('finish'))}</button><span id="recording-state" class="recording-state ${recorder?.state === 'recording' ? 'active' : ''}" role="status">${esc(recordStatus)}</span></div>${recordedURL || recordServerURL ? `<audio id="recorded-audio" class="recorded-audio" src="${esc(recordedURL || recordServerURL)}" controls></audio>` : ''}</div><span class="panel-note">${esc(t('noModel'))}</span>`;
@@ -225,7 +241,7 @@ function renderPractice() {
 }
 
 function showPracticeTop() {
-  const top = $('#practice').getBoundingClientRect().top;
+  const top = ($('#recent-controls')&&!$('#recent-controls').hidden?$('#recent-controls'):$('#practice')).getBoundingClientRect().top;
   // Returning from the controls or a long answer starts the next item at its top.
   // Leave an already visible card in place during ordinary short-word practice.
   if (top < 16 || top > window.innerHeight / 4) {
@@ -545,8 +561,10 @@ document.addEventListener('click', event => {
   const button = event.target.closest('button'); if (!button || button.disabled) return;
   if (button.dataset.close) return document.getElementById(button.dataset.close).close();
   if(button.id==='paragraph-generate'){void generateParagraph();button.blur();}
-  else if(button.id==='recent-paragraph-toggle'){void openSession(state.selectedLanguage,3,true,session?.purpose==='recent-paragraphs'?undefined:'recent-paragraphs');button.blur();}
-  else if(button.id==='recent-toggle'){void openSession(state.selectedLanguage,3,true,session?.purpose==='recent-words'?undefined:'recent-words');button.blur();}
+  else if(button.id==='recent-paragraph-toggle'){void openSession(state.selectedLanguage,3,true,'recent-paragraphs');button.blur();}
+  else if(button.id==='recent-toggle'){void openSession(state.selectedLanguage,3,true,'recent-words');button.blur();}
+  else if(button.id==='review-return'){void openSession(state.selectedLanguage,3,true);button.blur();}
+  else if(button.id==='review-word-practice'){void openSession(state.selectedLanguage,2,true);button.blur();}
   else if(button.id==='assessment-start'){void openAssessment();button.blur();}
   else if(button.id==='assessment-return'){void openSession();button.blur();}
   else if (button.dataset.stage) { void openSession(state.selectedLanguage, Number(button.dataset.stage), true); button.blur(); }
