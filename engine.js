@@ -29,7 +29,11 @@ export class OfflineEngine {
   async audio(parsed,run=callback=>callback(),signal){
     const id=knownLanguage(parsed.searchParams.get('languageId')),entryId=parsed.searchParams.get('entryId'),kind=parsed.searchParams.get('kind')||'word',sessionId=parsed.searchParams.get('sessionId'),taskId=parsed.searchParams.get('taskId'),example=parsed.searchParams.get('example');
     requireValue(['word','sentence'].includes(kind),'音频种类无效。');requireValue(!parsed.searchParams.has('example')||example==='1'&&kind==='sentence'&&sessionId&&taskId,'例句语音参数无效。');
-    const validate=()=>example?this.learning.validateExampleAudio(id,entryId,sessionId,taskId):this.learning.validateAudioTask(id,entryId,sessionId,taskId);
+    const selected=example&&this.exampleReader?await this.exampleReader.select(sessionId,taskId):null;
+    const validate=()=>{
+      if(selected){const session=this.store.state.sessions[sessionId];requireValue(session?.languageId===id&&session.task?.id===taskId&&!this.learning.needsRefresh(session)&&selected.example?.hasAudio&&selected.example.entryId===entryId,'例句题目已更换。',409,'task_conflict');}
+      else if(example)this.learning.validateExampleAudio(id,entryId,sessionId,taskId);else this.learning.validateAudioTask(id,entryId,sessionId,taskId);
+    };
     const record=await run(async()=>{await this.store.refresh();await this.ensureLanguage(id);this.syncRuntimeParagraphs();validate();const row=this.document.audio[`${entryId}:${kind}`];requireValue(row,'这项音频尚未准备。',404,'audio_unavailable');return row;});
     const response=await publicAsset(this.cacheName,this.base,record,{save:false,fetcher:this.fetcher,signal}),bytes=await response.arrayBuffer();
     await run(async()=>{await this.store.refresh();await this.ensureLanguage(id);validate();if(!example&&(kind==='word'||['recent-words','recent-paragraphs'].includes(this.store.state.sessions[sessionId]?.purpose)))await this.learning.audioReady(id,entryId,record.metadata,sessionId,taskId);});

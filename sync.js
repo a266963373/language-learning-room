@@ -62,12 +62,18 @@ export class SupabaseSync {
   }
   async signOut() {await this.sync().catch(()=>{});this.storage.removeItem(AUTH_KEY);this.auth=null;this.status('已退出同步账号，本机进度保留。','signed-out');}
   async snapshot() {
-    const snapshot=await this.engine.store.snapshot(),state=structuredClone(snapshot.state),recordings={};
+    const snapshot=await this.engine.store.snapshot(),state=snapshot.state,recordings={};
     for(const row of snapshot.recordings){const bytes=await row.blob.arrayBuffer();recordings[row.id]={type:row.blob.type,bytes:bytes.byteLength,sha256:sha256(bytes)};}
     for(const [id,row] of Object.entries(state.recordings)){delete row.filename;row.url=`recording:${id}`;}
     state.jobs={};validateState(state);
-    const ui=parse(this.storage.getItem('multi-offline-ui'))||{};
-    return {format:'language-room-multi-sync',version:1,state,ui,recordings};
+    await this.refreshContext?.();const ui=parse(this.storage.getItem('multi-offline-ui'))||{};
+    const payload={format:'language-room-multi-sync',version:1,state,ui,recordings};
+    this.snapshotRevisions??=new WeakMap();if(snapshot.revision!==undefined)this.snapshotRevisions.set(payload,snapshot.revision);return payload;
+  }
+  async matches(payload){
+    await this.refreshContext?.();const revision=this.snapshotRevisions?.get(payload);
+    if(revision!==undefined&&this.engine.store.revision)return revision===await this.engine.store.revision()&&equal(payload.ui,parse(this.storage.getItem('multi-offline-ui'))||{});
+    return equal(payload,await this.snapshot());
   }
   validate(payload) {
     if(payload?.format!=='language-room-multi-sync'||payload.version!==1||!payload.recordings||Array.isArray(payload.recordings))throw new Error('云端存档格式无效，未覆盖本机。');validateState(payload.state);
@@ -100,7 +106,7 @@ export class SupabaseSync {
     const uid=this.auth.user.id,owner=await this.meta('sync-owner');if(owner&&owner!==uid)throw new Error('同步账号与本机进度所属账号不一致。');
     let baseline=await this.meta(`sync-base:${uid}`);
     for(let attempt=0;attempt<3;attempt++) {
-      const local=await this.run(()=>this.snapshot()),remote=await this.remote(baseline);
+      const local=await this.snapshot(),remote=await this.remote(baseline);
       if(remote.payload)this.validate(remote.payload);
       let merged;
       if(!remote.payload)merged=local;
@@ -111,21 +117,20 @@ export class SupabaseSync {
       }
       const recordings=equal(merged,local)?null:await this.downloadRecordings(merged);
       // Typing may continue while requests are in flight. Do not discard a new draft.
-      if(!equal(local,await this.run(()=>this.snapshot()))||!this.canApply()){this.status('本机已保存 · 操作结束后继续同步');this.syncAgain=this.canApply();this.schedule();return;}
+      if(!await this.matches(local)||!this.canApply()){this.status('本机已保存 · 操作结束后继续同步');this.syncAgain=this.canApply();this.schedule();return;}
       let revision=remote.revision;
       if(!equal(merged,remote.payload)) {
         // First save any remote-only blobs locally without replacing the state.
         if(recordings){const tx=this.engine.store.db.transaction('recordings','readwrite');for(const row of recordings)tx.objectStore('recordings').put(row.blob,row.id);await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});}
         await this.uploadRecordings(merged,remote.payload);
-        if(!equal(local,await this.run(()=>this.snapshot()))){this.status('本机已保存 · 继续同步最新进度');this.syncAgain=this.canApply();this.schedule();return;}
+        if(!await this.matches(local)){this.status('本机已保存 · 继续同步最新进度');this.syncAgain=this.canApply();this.schedule();return;}
         const response=await this.writeRemote(remote.revision,merged);
         if(response.conflict)continue;revision=response.revision;
       }
       const changed=!equal(local,merged);
       const applied=await this.run(async()=>{
         if(this.auth?.user?.id!==uid)return false;
-        const current=await this.snapshot();
-        if(!equal(local,current)||(changed&&!this.canApply())){
+        if(!await this.matches(local)||(changed&&!this.canApply())){
           // Remember both the accepted cloud snapshot and its local parent.
           // A grade during an upload is rebased next time, never overwritten.
           await this.meta(`sync-base:${uid}`,{revision,payload:merged,...(changed?{localBase:local}:{})});
@@ -150,11 +155,11 @@ export class SupabaseSync {
   }
   resolve(which) {return this.networkRun(async()=>{
     if(!this.conflict)throw new Error('冲突已处理。');const fresh=await this.remote();if(fresh.revision!==this.conflict.remote.revision){this.conflict=null;return this.syncLocked();}
-    const local=await this.run(()=>this.snapshot());if(!equal(local,this.conflict.local)){this.conflict=null;return this.syncLocked();}
+    const local=await this.snapshot();if(!equal(local,this.conflict.local)){this.conflict=null;return this.syncLocked();}
     const payload=which==='local'?local:this.conflict.remote.payload,recordings=await this.downloadRecordings(payload);let revision=fresh.revision;
     if(which==='local'){await this.uploadRecordings(payload,fresh.payload);const result=await this.writeRemote(revision,payload);if(result.conflict){this.conflict=null;return this.syncLocked();}revision=result.revision;}
     const applied=await this.run(async()=>{
-      if(!equal(local,await this.snapshot())||!this.canApply()){this.status('本机有新操作，请重新选择同步版本。','conflict');return false;}
+      if(!await this.matches(local)||!this.canApply()){this.status('本机有新操作，请重新选择同步版本。','conflict');return false;}
       if(which!=='local')await this.apply(payload,recordings);
       await this.meta(`sync-base:${this.auth.user.id}`,{revision,payload});return true;
     });if(!applied)return;this.conflict=null;this.status('已同步选择的进度','synced');if(which!=='local')this.onApply();

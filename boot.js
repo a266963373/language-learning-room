@@ -4,6 +4,8 @@ import { exportBackup, readBackup, restoreBackup } from './backup.js';
 import { SupabaseSync } from './sync.js';
 import { mountStorage } from './storage-ui.js';
 import {localize,watchLocale} from './locale.js';
+import {ExampleReader} from './example-reader.js';
+import {backgroundSync} from './sync-background.js';
 const base=new URL('./',location.href),nativeFetch=window.fetch.bind(window),shell=document.querySelector('.app-shell');
 const panel=document.createElement('main');panel.className='installer';panel.innerHTML='<p>LANGUAGE ROOM</p><h1>九门语言，打开就学。</h1><p>正在加载程序和当前语言教材，音频在练习时逐条在线播放，无需下载整包。</p><p id="boot-status" role="status">正在打开学习室…</p><button type="button" id="retry-load" hidden>重新打开</button>';document.body.append(panel);
 const downloadSection=document.createElement('section');downloadSection.className='offline-download';downloadSection.innerHTML='<h3>离线学习（可选）</h3><p>平时直接在线学习，播放当前词句时才加载音频，不另外保存整包。需要断网学习时，再下载全部九语教材和音频。</p><p id="install-status" role="status">正在检查离线包…</p><progress id="install-progress" max="1" value="0" hidden></progress><button id="download-course" type="button">下载完整离线包</button><p>iPhone 可在 Safari“分享 → 添加到主屏幕”，从图标进入。下载请使用 Wi-Fi，保持页面打开。</p>';
@@ -17,6 +19,7 @@ function controls(syncConfig) {
   const indicator=document.createElement('p');indicator.className='offline-status';shell.querySelector('.learning-tools').append(indicator);
   manager=new SupabaseSync(engine,syncConfig,{fetcher:nativeFetch,canApply:()=>window.travelCanReload?.()!==false,onStatus:(text,kind)=>{controls.querySelector('#sync-status').textContent=text;indicator.textContent=text;controls.querySelector('#sync-conflict').hidden=kind!=='conflict';controls.querySelector('#sync-login').hidden=Boolean(manager.auth);controls.querySelector('#sync-signout').hidden=!manager.auth;},onApply:()=>{window.multiOffline.restoring=true;location.reload();}});
   window.multiOffline.sync=manager;
+  backgroundSync(manager,base);
   let busy=false;const feedback=controls.querySelector('#backup-status');
   try{const receipt=JSON.parse(localStorage.getItem('multi-offline-last-import'));if(receipt&&Number.isInteger(receipt.reviews)&&Number.isInteger(receipt.recordings))feedback.textContent=`最近一次本机导入：${new Date(receipt.at).toLocaleString()}，${receipt.reviews.toLocaleString()} 条练习记录、${receipt.recordings} 份录音。当前保留的各语言历史见下方“已保存的累计学习记录”；云端是否完成请看上方同步状态。`;}catch{}
   const action=callback=>async event=>{event?.preventDefault();if(busy)return;busy=true;try{await callback(event);}catch(error){feedback.textContent=error.message;}finally{busy=false;}};
@@ -48,9 +51,11 @@ function controls(syncConfig) {
 async function launch() {
   if(engine){location.reload();return;}
   engine=await new OfflineEngine(await openDatabase(),documentPack,base,undefined,{fetcher:nativeFetch}).init();window.multiOffline={engine,release};
+  engine.exampleReader=new ExampleReader(engine,base);
   const configResponse=await cache.match(new URL('sync-config.json',base)),syncConfig=await configResponse.json();
   shell.hidden=false;panel.remove();controls(syncConfig);
   window.fetch=(input,options={})=>{const url=new URL(typeof input==='string'?input:input.url,location.href);if(url.origin===location.origin&&url.pathname.startsWith('/api/')){
+    if(url.pathname==='/api/word-example')return engine.exampleReader.handle(url);
     const execute=async()=>{const result=await engine.handle(url,{...options,runLocal:callback=>manager.run(callback)});if(result.ok)manager.schedule();return result;};
     return url.pathname==='/api/audio'?execute():manager.run(execute);
   }return nativeFetch(input,options);};
