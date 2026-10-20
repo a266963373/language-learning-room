@@ -22,6 +22,7 @@ let recorder = null, stream = null, recordedURL = null, recordSaving = false, re
 let audioFetch = null, lessonObjectURL = null;
 let chosen = null, responseText = '', recordStatus = '', recordServerURL = null, audioHeard = false, lastAudioStatus = '', recognition = cache.recognition === true, listenFirst = cache.listenFirst === true;
 const audio = $('#lesson-audio');
+const exampleAudio=new Audio();let exampleState={key:null,status:'idle'},exampleFetch=null,exampleObjectURL=null;
 const task = () => session?.task;
 const itemKey = () => session && task() ? `${session.sessionId}:${task().id}` : null;
 const selectionKey = () => `${state?.selectedLanguage}:${state?.selectedStage}`;
@@ -172,6 +173,40 @@ function reviewSupportMarkup(item){
   return `<aside class="review-support"><p>${esc(uiLanguage==='zh'?'仅这一个背景词需要提示：':'One background word to help you read:')}</p>${support.map(word=>`<p><strong>${esc(word.text)}</strong> — ${esc(taskHelpers().map(id=>word.meanings?.[id]).filter(Boolean).join(' / ')||word.meanings?.en||'')}</p>`).join('')}</aside>`;
 }
 
+function wordExampleMarkup(){
+  const zh=uiLanguage==='zh',heading=`<h3>${zh?'这个词怎么用':'See this word in use'}</h3>`;
+  if(exampleState.key!==itemKey()||exampleState.status==='loading'||exampleState.status==='idle')return heading+`<p class="panel-note">${zh?'正在查找简短例句…':'Finding a short example…'}</p>`;
+  const example=exampleState.example;
+  if(!example)return heading+`<p class="panel-note">${zh?'暂时没有足够简单的例句，先记住这个词即可。':'No sufficiently simple example is available yet.'}</p>`;
+  const text=reviewSentenceParts(example.sentence.text,[example.target],state.selectedLanguage).map(part=>part.reviewTarget?`<button type="button" class="review-target-highlight" data-entry="${esc(part.entryId)}">${esc(part.text)}</button>`:esc(part.text)).join('');
+  const translations=taskHelpers().map(id=>`<p class="example-translation" lang="${esc(id)}"><span>${esc(languageNames[id]??id)}${example.helperTranslationProvenance?.[id]?.quality?.includes('machine')?(zh?' · 机器翻译':' · Machine translation'):''}</span> ${esc(example.sentence.meanings[id]??'')}</p>`).join('');
+  const support=example.supportWords.length?`<div class="example-support"><span>${zh?'背景词提示':'Words to help you read'}</span>${example.supportWords.map(word=>`<p><strong>${esc(word.text)}</strong> — ${esc(taskHelpers().map(id=>word.meanings[id]).filter(Boolean).join(' / ')||word.meanings.en||'')}</p>`).join('')}</div>`:'';
+  const note=example.matchKind==='linked-sense'?(zh?'已关联的用法例句':'Linked usage example'):(zh?'句库原句参考 · 同词形，词义依语境':'Sentence-library reference · meaning depends on context');
+  const source=example.sentence.provenance,url=source?.sourceUrl;
+  const attribution=typeof url==='string'&&url.startsWith('https://')?` <a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${zh?'原句来源':'Source'}${source.author?' · '+esc(source.author):''}</a>`:'';
+  return heading+`<p class="example-sentence" lang="${esc(state.selectedLanguage)}" dir="${isArabic()?'rtl':'auto'}">${text}</p>${translations}${support}<p class="example-note">${esc(note)}${attribution}</p>${example.audioUrl?`<button type="button" id="play-word-example">▷ ${zh?'播放例句':'Play example'}</button><span id="word-example-audio-status" class="panel-note" role="status"></span>`:''}`;
+}
+async function loadWordExample(){
+  if(!revealed||!task()||![1,2].includes(Number(task().practiceStage??task().stage)))return;
+  const key=itemKey();if(exampleState.key===key&&exampleState.status!=='idle')return;
+  exampleState={key,status:'loading'};
+  try{const result=await request(`/api/word-example?${new URLSearchParams({sessionId:session.sessionId,taskId:task().id})}`);
+    if(key!==itemKey()||!revealed)return;exampleState={key,status:'ready',example:result.example};
+  }catch{if(key!==itemKey()||!revealed)return;exampleState={key,status:'error'};}
+  if($('#word-example'))$('#word-example').innerHTML=wordExampleMarkup();
+}
+async function playWordExample(){
+  const key=itemKey(),example=exampleState.key===key&&exampleState.example;if(!example?.audioUrl)return;
+  exampleFetch?.abort();exampleFetch=new AbortController();exampleAudio.pause();audio.pause();
+  const status=text=>{if(key===itemKey()&&$('#word-example-audio-status'))$('#word-example-audio-status').textContent=text;};
+  try{status(uiLanguage==='zh'?'正在加载…':'Loading…');const response=await fetch(example.audioUrl,{signal:exampleFetch.signal});if(!response.ok)throw Error('Example audio unavailable');const blob=await response.blob();
+    if(key!==itemKey())return;if(!blob.size||!blob.type.startsWith('audio/'))throw Error('Example audio invalid');
+    if(exampleObjectURL)URL.revokeObjectURL(exampleObjectURL);exampleObjectURL=URL.createObjectURL(blob);exampleAudio.src=exampleObjectURL;
+    await exampleAudio.play();status(uiLanguage==='zh'?'正在播放例句':'Playing example');
+    exampleAudio.onended=()=>status(uiLanguage==='zh'?'例句播放完毕':'Example finished');
+  }catch(error){if(error.name!=='AbortError')status(uiLanguage==='zh'?'例句语音暂不可用，不影响继续学习。':'Example audio is unavailable; you can continue learning.');}
+}
+
 function hanjaMarkup(item=task()) {
   if(state.selectedLanguage!=='ko' || !item?.hanja?.length) return '';
   return `<div class="korean-hanja"><span class="helper-language-label">${uiLanguage==='zh'?'汉字词形':'Hanja'}${Number(task()?.stage)>=3 ? ` · ${esc(item.display || item.lemma || '')}` : ''}</span><p lang="ko-Hani">${item.hanja.map(esc).join(' / ')}</p></div>`;
@@ -244,7 +279,9 @@ function renderPractice() {
     center = `${translatedMarkup(item.prompts || (typeof item.prompt === 'object' ? item.prompt : { [prompt.language]: prompt.text }), 'prompts')}<div class="output-response"><label class="sr-only" for="response">${esc(t('response'))}</label><textarea id="response" maxlength="10000" placeholder="${esc(t('responsePlaceholder'))}" lang="${esc(state.selectedLanguage)}" dir="${direction}">${esc(responseText)}</textarea><div class="output-tools"><button type="button" id="record" ${recordSaving ? 'disabled' : ''}>${esc(recorder?.state === 'recording' ? t('stop') : t('record'))}</button><button type="button" id="finish-writing">${esc(t('finish'))}</button><span id="recording-state" class="recording-state ${recorder?.state === 'recording' ? 'active' : ''}" role="status">${esc(recordStatus)}</span></div>${recordedURL || recordServerURL ? `<audio id="recorded-audio" class="recorded-audio" src="${esc(recordedURL || recordServerURL)}" controls></audio>` : ''}</div><span class="panel-note">${esc(t('noModel'))}</span>`;
     if (revealed) answer = `<div class="answer"><div class="answer-label">${esc(t('reference'))}</div>${targetWithHanja((item.references || []).map(reference => `<p class="answer-text" lang="${esc(state.selectedLanguage)}" dir="${direction}">${targetMarkup(typeof reference === 'string' ? reference : reference.text || '')}</p>`).join('') || `<p class="missing">${esc(t('unavailable'))}</p>`)}<span class="panel-note">${esc(t('comparison'))}</span></div>`;
   }
+  if(revealed&&stage<=2)answer=`<div class="word-answer-layout">${answer}<aside id="word-example" class="word-example" aria-label="${esc(uiLanguage==='zh'?'这个词怎么用':'Word usage example')}">${wordExampleMarkup()}</aside></div>`;
   $('#practice').innerHTML = `<div class="practice-meta"><span>${esc(item.purpose==='recent-paragraphs' ? (uiLanguage==='zh'?(item.sentence?.provenance?.generator==='rules'?'本地规则小段落 · 语音可选':'词汇小段落 · 语音可选'):(item.sentence?.provenance?.generator==='rules'?'Local rule passage · optional audio':'Vocabulary passage · optional audio')) : item.purpose==='recent-words' ? (uiLanguage==='zh'?'近期词 · 已配音短句':'Recent words · voiced sentences') : item.purpose==='assessment' ? (uiLanguage==='zh'?'词汇量校准 · 揭晓前回忆词义':'Vocabulary calibration · recall meaning before reveal') : item.variant?.startsWith('word-meaning-') ? (uiLanguage === 'zh' ? `${item.isReview ? '词义复习' : '词义抽查'} · 在揭晓前回忆意思` : `Word-meaning ${item.isReview ? 'review' : 'check'} · recall before revealing`) : strings[uiLanguage].stages[stage - 1])}</span>${meta}</div><div class="card-center" tabindex="0" role="region" aria-label="${esc(uiLanguage==='zh'?'题目与答案，可滚动阅读':'Question and answer, scroll to read')}">${center}${answer || '<div class="answer-placeholder" aria-hidden="true"></div>'}</div><div class="actions">${revealed ? `<div class="ratings">${t('ratings').map((label, index) => `<button type="button" class="rating" data-rating="${index + 1}"><kbd>${index + 1}</kbd><span>${esc(label)}</span></button>`).join('')}</div>` : `<button type="button" id="reveal" class="primary">${esc(t('reveal'))} <span aria-hidden="true">␣</span></button>`}</div>`;
+  if(revealed&&stage<=2)queueMicrotask(()=>void loadWordExample());
   $('#practice .card-center').scrollTop = previousScroll;
   setBusy(busy);
 }
@@ -273,6 +310,7 @@ function showAnswer() {
 }
 
 function cleanupMedia() {
+  exampleFetch?.abort();exampleFetch=null;exampleAudio.pause();exampleAudio.removeAttribute('src');exampleAudio.load();if(exampleObjectURL)URL.revokeObjectURL(exampleObjectURL);exampleObjectURL=null;exampleState={key:null,status:'idle'};
   audioToken++; clearTimeout(audioTimer); audio.pause(); audio.removeAttribute('src'); audio.load();
   audioFetch?.abort(); audioFetch = null;
   if (lessonObjectURL) URL.revokeObjectURL(lessonObjectURL);
@@ -386,6 +424,7 @@ async function rate(rating) {
 }
 
 async function playAudio(kind, automatic = false) {
+  exampleAudio.pause();
   const url = task()?.audio?.[kind];
   if (!url) return;
   const taskId = task().id;
@@ -584,6 +623,7 @@ document.addEventListener('click', event => {
   else if (button.dataset.option) { chosen = Number(button.dataset.option); saveItem(); renderPractice(); }
   else if (button.id === 'reveal') { reveal(); button.blur(); }
   else if (button.id === 'play-audio') { void playAudio(button.dataset.kind); if (event.detail > 0) button.blur(); }
+  else if(button.id==='play-word-example'){void playWordExample();button.blur();}
   else if (button.id === 'record') void toggleRecording();
   else if (button.id === 'finish-writing') { $('#response').blur(); saveItem(); reveal(); }
   else if (button.id === 'settings-button') { renderSettings(); $('#settings-dialog').showModal(); }

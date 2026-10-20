@@ -41,7 +41,10 @@ async function launch() {
   engine=await new OfflineEngine(await openDatabase(),documentPack,base,undefined,{fetcher:nativeFetch}).init();window.multiOffline={engine,release};
   const configResponse=await cache.match(new URL('sync-config.json',base)),syncConfig=await configResponse.json();
   shell.hidden=false;panel.remove();controls(syncConfig);
-  window.fetch=(input,options={})=>{const url=new URL(typeof input==='string'?input:input.url,location.href);if(url.origin===location.origin&&url.pathname.startsWith('/api/'))return manager.run(async()=>{const result=await engine.handle(url,options);if(result.ok)manager.schedule();return result;});return nativeFetch(input,options);};
+  window.fetch=(input,options={})=>{const url=new URL(typeof input==='string'?input:input.url,location.href);if(url.origin===location.origin&&url.pathname.startsWith('/api/')){
+    const execute=async()=>{const result=await engine.handle(url,{...options,runLocal:callback=>manager.run(callback)});if(result.ok)manager.schedule();return result;};
+    return url.pathname==='/api/audio'?execute():manager.run(execute);
+  }return nativeFetch(input,options);};
   window.addEventListener('storage',event=>{if(event.key==='multi-offline-import-id'){window.multiOffline.restoring=true;location.reload();}});
   await import('./app.js');try{await navigator.storage?.persist?.();}catch{}
 }

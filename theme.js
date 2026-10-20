@@ -24,6 +24,7 @@
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', root.dataset.theme === 'dark' ? '#171f1c' : '#f7f6f2');
     if (persist) {
       try { localStorage.setItem(storageKey, root.dataset.theme); } catch { /* Skin still works without storage. */ }
+      window.dispatchEvent(new CustomEvent('language-room-theme-change',{detail:root.dataset.theme}));
     }
     syncControls();
   }
@@ -32,6 +33,7 @@
   try { saved = localStorage.getItem(storageKey); } catch { /* Preserve the light default. */ }
   apply(saved);
   const toggle = () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true);
+  window.languageRoomTheme={apply:value=>apply(value,false)};
 
   document.addEventListener('DOMContentLoaded', syncControls);
   new MutationObserver(syncControls).observe(root, { attributes: true, attributeFilter: ['lang'] });
