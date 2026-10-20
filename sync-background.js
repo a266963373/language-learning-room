@@ -1,7 +1,8 @@
 // Cloud serialization, validation, merging and compression belong off the UI
 // thread. The existing sync protocol and cross-tab learning lock are shared.
 export function backgroundSync(manager,base){
- if(typeof Worker!=='function')return;
+ // Without a shared Web Lock, keep the existing same-page operation queue.
+ if(typeof Worker!=='function'||!navigator.locks)return;
  let worker,serial=0,inFlight,applying=Promise.resolve();const pending=new Map();
  const context=()=>({'multi-offline-ui':manager.storage.getItem('multi-offline-ui'),'multi-offline-auth':manager.storage.getItem('multi-offline-auth'),canApply:manager.canApply()});
  function start(){
