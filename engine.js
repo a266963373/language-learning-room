@@ -4,16 +4,17 @@ import { OfflineStore } from './store.js';
 import { randomUUID, sha256 } from './crypto.js';
 import { requireValue, HttpError } from './lib/errors.js';
 import { ParagraphGeneration } from './lib/paragraph-generation.js';
+import { publicAsset } from './assets.js';
 export const CACHE_PREFIX='language-room-multi-';
 export class OfflineEngine {
-  constructor(db,document,base=new URL('./',location.href),clock=()=>new Date()) {
+  constructor(db,document,base=new URL('./',location.href),clock=()=>new Date(),{fetcher=globalThis.fetch.bind(globalThis)}={}) {
     this.document=document; this.base=base; this.content=new OfflineContent(document); this.store=new OfflineStore(db,initialState); this.cacheName=CACHE_PREFIX+document.version;
     this.media={available:(_id,entry,kind)=>Boolean(document.audio[`${entry.id}:${kind}`]),hasPreparedSentence:(_id,entry)=>Boolean(document.audio[`${entry.id}:sentence`]?.metadata.decodeVerified),revision:(_id,entry)=>({offlineAudio:['word','sentence'].map(kind=>document.audio[`${entry.id}:${kind}`]?.sha256||null)})};
-    this.learning=new Learning(this.store,this.content,this.media,clock);
+    this.fetcher=fetcher;this.learning=new Learning(this.store,this.content,this.media,clock);
   }
   async ensureLanguage(id) {
     knownLanguage(id);if(this.loadedLanguage===id)return;
-    const cache=await caches.open(this.cacheName),response=await cache.match(new URL(this.document.languages[id].file,this.base));if(!response)throw new Error('这门语言的教材未完成下载，请联网补全。');const pack=await response.json();
+    const document=this.document.languages[id],cache=await caches.open(this.cacheName),response=document.asset?await publicAsset(this.cacheName,this.base,document.asset,{fetcher:this.fetcher}):await cache.match(new URL(document.file,this.base));if(!response)throw new Error('这门语言的教材尚未离线保存，请联网重试。');const pack=await response.json();
     if(this.loadedLanguage)this.content.install(this.loadedLanguage,this.document.languages[this.loadedLanguage]);this.content.install(id,pack);this.document.audio=pack.audio;this.loadedLanguage=id;this.learning.recentWords.indexes.clear();
   }
   syncRuntimeParagraphs(){
@@ -21,7 +22,7 @@ export class OfflineEngine {
   }
   async refreshSelected(){const id=this.store.state.selectedLanguage;await this.ensureLanguage(id);this.syncRuntimeParagraphs();await this.learning.refreshContent(id);}
   async init() { await this.store.init(); await this.store.transaction(state=>initializeLearningState(state)); await this.refreshSelected();this.paragraphs=new ParagraphGeneration(this.store,this.content,this.learning); return this; }
-  catalog() { return {providers:{paragraphGeneration:this.paragraphs.provider.info()},languages:Object.entries(this.document.languages).map(([id,pack])=>({id,...pack.info,availableStages:[1,2,3,4],...pack.counts,assessmentAvailable:Boolean(pack.assessment),version:pack.course.version,sources:[...pack.course.sources,...(pack.sentences.sources??[])],audioNote:'教材和自然音频已下载到当前设备。'}))}; }
+  catalog() { return {providers:{paragraphGeneration:this.paragraphs.provider.info()},languages:Object.entries(this.document.languages).map(([id,pack])=>({id,...pack.info,availableStages:[1,2,3,4],...pack.counts,assessmentAvailable:Boolean(pack.assessment),version:pack.course.version,sources:[...pack.course.sources,...(pack.sentences.sources??[])],audioNote:'音频逐条在线播放；可选下载离线包。'}))}; }
   async handle(url,options={}) {
     const parsed=new URL(url,this.base),path=parsed.pathname,method=options.method||'GET',data=()=>JSON.parse(options.body||'{}');
     try {
@@ -51,7 +52,7 @@ export class OfflineEngine {
         const id=knownLanguage(parsed.searchParams.get('languageId')),entryId=parsed.searchParams.get('entryId'),kind=parsed.searchParams.get('kind')||'word',sessionId=parsed.searchParams.get('sessionId'),taskId=parsed.searchParams.get('taskId');
         requireValue(['word','sentence'].includes(kind),'音频种类无效。'); this.learning.validateAudioTask(id,entryId,sessionId,taskId);
         const record=this.document.audio[`${entryId}:${kind}`]; requireValue(record,'这项音频尚未准备。',404,'audio_unavailable');
-        const cache=await caches.open(this.cacheName),response=await cache.match(new URL(record.path,this.base)); requireValue(response,'音频未下载或已被系统清理，请联网补全下载。',503,'audio_unavailable');
+        const response=await publicAsset(this.cacheName,this.base,record,{save:false,fetcher:this.fetcher});
         const bytes=await response.arrayBuffer(); requireValue(sha256(bytes)===record.sha256,'音频校验失败，请重新下载。',422,'audio_mismatch');
         if(kind==='word'||['recent-words','recent-paragraphs'].includes(this.store.state.sessions[sessionId]?.purpose))await this.learning.audioReady(id,entryId,record.metadata,sessionId,taskId);
         return new Response(bytes,{headers:{'Content-Type':record.type,'Cache-Control':'no-store'}});
