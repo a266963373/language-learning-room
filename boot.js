@@ -2,12 +2,12 @@ import { OfflineEngine, CACHE_PREFIX } from './engine.js';
 import { openDatabase } from './store.js';
 import { exportBackup, readBackup, restoreBackup } from './backup.js';
 import { SupabaseSync } from './sync.js';
-import { publicAsset } from './assets.js';
+import { mountStorage } from './storage-ui.js';
 const base=new URL('./',location.href),nativeFetch=window.fetch.bind(window),shell=document.querySelector('.app-shell');
 const panel=document.createElement('main');panel.className='installer';panel.innerHTML='<p>LANGUAGE ROOM</p><h1>九门语言，打开就学。</h1><p>正在加载程序和当前语言教材，音频在练习时逐条在线播放，无需下载整包。</p><p id="boot-status" role="status">正在打开学习室…</p><button type="button" id="retry-load" hidden>重新打开</button>';document.body.append(panel);
 const downloadSection=document.createElement('section');downloadSection.className='offline-download';downloadSection.innerHTML='<h3>离线学习（可选）</h3><p>平时直接在线学习，播放当前词句时才加载音频，不另外保存整包。需要断网学习时，再下载全部九语教材和音频。</p><p id="install-status" role="status">正在检查离线包…</p><progress id="install-progress" max="1" value="0" hidden></progress><button id="download-course" type="button">下载完整离线包</button><p>iPhone 可在 Safari“分享 → 添加到主屏幕”，从图标进入。下载请使用 Wi-Fi，保持页面打开。</p>';
 const status=downloadSection.querySelector('#install-status'),progress=downloadSection.querySelector('progress'),download=downloadSection.querySelector('button');
-let registration,engine,cache,release,documentPack,manager,downloading=false;
+let registration,engine,cache,release,documentPack,manager,storageTools;
 export function saveFile(blob,name){const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
 const message=text=>{status.textContent=text;};
 function controls(syncConfig) {
@@ -28,10 +28,11 @@ function controls(syncConfig) {
     controls.querySelector(`#choose-${which}`).onclick=action(async()=>{if(!confirm(`将继续${which==='local'?'本机':'云端'}版本。选择前会下载另一版本的完整备份，请保存好。是否继续？`))return;saveFile(await manager.conflictBackup(which==='local'?'cloud':'local'),`language-room-alternate-${Date.now()}.json`);await manager.resolve(which);});
   }
   controls.append(downloadSection);
+  storageTools=mountStorage({release,base,cache,registration,section:downloadSection,fetcher:nativeFetch});
   const update=document.createElement('button');update.type='button';update.textContent='有更新 · 安装新版';update.hidden=true;controls.append(update);
   const topUpdate=update.cloneNode(true);topUpdate.textContent='有新版 · 更新网站';shell.querySelector('.top-actions').append(topUpdate);
   const notify=()=>{update.hidden=topUpdate.hidden=!registration.waiting;},watch=()=>{registration.installing?.addEventListener('statechange',notify);notify();};watch();registration.addEventListener('updatefound',watch);
-  update.onclick=topUpdate.onclick=action(async()=>{if(!registration.waiting)return;if(downloading||window.travelCanReload?.()===false){feedback.textContent='请先结束当前操作或离线下载，再更新网站。';return;}await manager.run(async()=>{navigator.serviceWorker.addEventListener('controllerchange',()=>location.reload(),{once:true});registration.waiting.postMessage('activate-update');});});
+  update.onclick=topUpdate.onclick=action(async()=>{if(!registration.waiting)return;if(storageTools?.busy||window.travelCanReload?.()===false){feedback.textContent='请先结束当前操作或存储管理，再更新网站。';return;}await manager.run(async()=>{navigator.serviceWorker.addEventListener('controllerchange',()=>location.reload(),{once:true});registration.waiting.postMessage('activate-update');});});
   manager.start();
 }
 async function launch() {
@@ -43,17 +44,6 @@ async function launch() {
   window.addEventListener('storage',event=>{if(event.key==='multi-offline-import-id'){window.multiOffline.restoring=true;location.reload();}});
   await import('./app.js');try{await navigator.storage?.persist?.();}catch{}
 }
-async function downloadAudio() {
-  if(downloading)return;downloading=true;download.disabled=true;let completed=0,wake;const queue=[...release.shell.filter(asset=>asset.path.startsWith('languages/')),...release.audio];progress.max=queue.length;progress.hidden=false;
-  try {
-    try{wake=await navigator.wakeLock?.request?.('screen');}catch{}
-    const worker=async()=>{while(queue.length){const asset=queue.shift();const response=await publicAsset(CACHE_PREFIX+release.version,base,asset,{required:true,fetcher:nativeFetch});await response.body?.cancel();progress.value=++completed;message(`正在准备 ${completed} / ${progress.max} 项教材与音频。可关闭设置继续学习，请保持页面打开。`);
-    }};
-    const results=await Promise.allSettled(Array.from({length:6},worker)),failed=results.find(result=>result.status==='rejected');if(failed)throw failed.reason;
-    await cache.put(new URL('offline-ready',base),new Response(release.version));message('完整离线包已就绪 · 全部九语教材和已配音内容可断网使用。');download.textContent='检查并补全离线包';
-  }catch(error){message(error.name==='QuotaExceededError'?'设备空间不足，已下载部分保留。在线学习仍可继续。':error.message+' 已完成部分保留，可继续下载；在线学习不受影响。');download.textContent='继续下载离线包';}finally{downloading=false;download.disabled=false;await wake?.release?.().catch(()=>{});}
-}
-download.onclick=()=>void downloadAudio();
 async function initialize() {
   try {
     if(!isSecureContext||!('serviceWorker'in navigator)||!('indexedDB'in window))throw new Error('请通过HTTPS网址打开；iPhone不能直接打开ZIP安装。');
@@ -62,7 +52,7 @@ async function initialize() {
     if(!navigator.serviceWorker.controller)await new Promise((resolve,reject)=>{const timer=setTimeout(()=>finish(new Error('离线组件尚未下载完成，请联网重试。')),180000),worker=registration.installing;const finish=error=>{clearTimeout(timer);navigator.serviceWorker.removeEventListener('controllerchange',controlled);worker?.removeEventListener('statechange',changed);error?reject(error):resolve();},controlled=()=>{if(navigator.serviceWorker.controller)finish();},changed=()=>{if(worker.state==='redundant'&&!registration.active)finish(new Error('离线组件下载失败，请联网重试。'));};navigator.serviceWorker.addEventListener('controllerchange',controlled);worker?.addEventListener('statechange',changed);controlled();});
     const response=await nativeFetch(new URL('release.json',base));if(!response.ok)throw new Error('学习包暂时无法加载。');release=await response.json();cache=await caches.open(CACHE_PREFIX+release.version);
     const courseResponse=await cache.match(new URL('course.json',base));if(!courseResponse)throw new Error('应用更新尚未完成，请刷新重试。');documentPack=await courseResponse.json();
-    const ready=await cache.match(new URL('offline-ready',base));message(ready&&(await ready.text())===release.version?'完整离线包已就绪 · 可断网学习全部九语。':`当前直接在线学习。完整离线音频约 ${(release.audio.reduce((total,row)=>total+row.bytes,0)/1024/1024).toFixed(0)} MB，教材另占空间；不下载也能使用。`);await launch();
+    const ready=await cache.match(new URL('offline-ready',base));message(ready&&(await ready.text())===release.version?'上次完整离线校验已通过；可检查实际保存内容。':`当前直接在线学习。完整离线音频约 ${(release.audio.reduce((total,row)=>total+row.bytes,0)/1024/1024).toFixed(0)} MB，教材另占空间；不下载也能使用。`);await launch();
   }catch(error){panel.querySelector('#boot-status').textContent=error.message;panel.querySelector('#retry-load').hidden=false;panel.querySelector('#retry-load').onclick=()=>location.reload();}
 }
 void initialize();
