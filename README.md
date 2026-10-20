@@ -1,6 +1,6 @@
 # 多语言学习室 · 出门版
 
-安装入口：https://a266963373.github.io/language-learning-room/
+安装入口：https://noulu.github.io/language-learning-room/
 
 英语、日语、韩语、西班牙语、法语、俄语、阿拉伯语、印度尼西亚语和印地语。保留四种训练、复习调度、固定题卡与已有已配音材料。
 
