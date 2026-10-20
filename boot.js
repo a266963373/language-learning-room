@@ -3,6 +3,7 @@ import { openDatabase } from './store.js';
 import { exportBackup, readBackup, restoreBackup } from './backup.js';
 import { SupabaseSync } from './sync.js';
 import { mountStorage } from './storage-ui.js';
+import {localize,watchLocale} from './locale.js';
 const base=new URL('./',location.href),nativeFetch=window.fetch.bind(window),shell=document.querySelector('.app-shell');
 const panel=document.createElement('main');panel.className='installer';panel.innerHTML='<p>LANGUAGE ROOM</p><h1>九门语言，打开就学。</h1><p>正在加载程序和当前语言教材，音频在练习时逐条在线播放，无需下载整包。</p><p id="boot-status" role="status">正在打开学习室…</p><button type="button" id="retry-load" hidden>重新打开</button>';document.body.append(panel);
 const downloadSection=document.createElement('section');downloadSection.className='offline-download';downloadSection.innerHTML='<h3>离线学习（可选）</h3><p>平时直接在线学习，播放当前词句时才加载音频，不另外保存整包。需要断网学习时，再下载全部九语教材和音频。</p><p id="install-status" role="status">正在检查离线包…</p><progress id="install-progress" max="1" value="0" hidden></progress><button id="download-course" type="button">下载完整离线包</button><p>iPhone 可在 Safari“分享 → 添加到主屏幕”，从图标进入。下载请使用 Wi-Fi，保持页面打开。</p>';
@@ -23,15 +24,23 @@ function controls(syncConfig) {
   controls.querySelector('#sync-now').onclick=action(()=>manager.sync());controls.querySelector('#sync-signout').onclick=action(()=>manager.signOut());
   controls.querySelector('#export-backup').onclick=action(async()=>{saveFile(await exportBackup(engine),`language-room-backup-${new Date().toISOString().slice(0,10)}.json`);feedback.textContent='已生成九语备份，请保存文件。';});
   controls.querySelector('#import-backup').onclick=()=>controls.querySelector('#backup-file').click();
-  controls.querySelector('#backup-file').onchange=action(async event=>{const file=event.target.files[0];event.target.value='';if(!file)return;feedback.textContent='正在校验备份，请稍候…';try{const payload=await readBackup(file,engine),reviews=Object.values(payload.state.languages).reduce((sum,language)=>sum+language.reviews.length,0);if(!confirm(`备份包含 ${reviews.toLocaleString()} 条练习记录、${payload.recordings.length} 份录音。导入会替换本机进度；登录后自动同步，有冲突时需选择版本。继续前会先导出本机旧备份。确定导入？`)){feedback.textContent='已取消导入，现有进度保留。';return;}saveFile(await exportBackup(engine),`language-room-before-import-${Date.now()}.json`);await manager.run(()=>restoreBackup(engine,payload));location.reload();}catch(error){feedback.textContent=`导入未完成：${error.message} 请保留原备份。`;feedback.scrollIntoView({block:'nearest'});}});
+  controls.querySelector('#backup-file').onchange=action(async event=>{const file=event.target.files[0];event.target.value='';if(!file)return;feedback.textContent='正在校验备份，请稍候…';try{const payload=await readBackup(file,engine),reviews=Object.values(payload.state.languages).reduce((sum,language)=>sum+language.reviews.length,0);if(!confirm(localize(`备份包含 ${reviews.toLocaleString()} 条练习记录、${payload.recordings.length} 份录音。导入会替换本机进度；登录后自动同步，有冲突时需选择版本。继续前会先导出本机旧备份。确定导入？`))){feedback.textContent='已取消导入，现有进度保留。';return;}saveFile(await exportBackup(engine),`language-room-before-import-${Date.now()}.json`);await manager.run(()=>restoreBackup(engine,payload));location.reload();}catch(error){feedback.textContent=`导入未完成：${error.message} 请保留原备份。`;feedback.scrollIntoView({block:'nearest'});}});
   for(const which of ['local','cloud']) {
     controls.querySelector(`#backup-${which}-conflict`).onclick=action(async()=>saveFile(await manager.conflictBackup(which),`language-room-${which}-${Date.now()}.json`));
-    controls.querySelector(`#choose-${which}`).onclick=action(async()=>{if(!confirm(`将继续${which==='local'?'本机':'云端'}版本。选择前会下载另一版本的完整备份，请保存好。是否继续？`))return;saveFile(await manager.conflictBackup(which==='local'?'cloud':'local'),`language-room-alternate-${Date.now()}.json`);await manager.resolve(which);});
+    controls.querySelector(`#choose-${which}`).onclick=action(async()=>{if(!confirm(localize(`将继续${which==='local'?'本机':'云端'}版本。选择前会下载另一版本的完整备份，请保存好。是否继续？`)))return;saveFile(await manager.conflictBackup(which==='local'?'cloud':'local'),`language-room-alternate-${Date.now()}.json`);await manager.resolve(which);});
   }
   controls.append(downloadSection);
   storageTools=mountStorage({release,base,cache,registration,section:downloadSection,fetcher:nativeFetch});
   const update=document.createElement('button');update.type='button';update.textContent='有更新 · 安装新版';update.hidden=true;controls.append(update);
   const topUpdate=update.cloneNode(true);topUpdate.textContent='有新版 · 更新网站';shell.querySelector('.top-actions').append(topUpdate);
+  watchLocale(controls,indicator,topUpdate);
+  window.multiOffline.checkForUpdates=async()=>{
+    await registration.update();
+    const response=await nativeFetch(new URL('release.json?update-check='+Date.now(),base),{cache:'no-store',signal:AbortSignal.timeout(15000)});
+    if(!response.ok)throw Error(document.documentElement.lang==='en'?'Update check failed. Progress is preserved.':'暂时无法检查更新，学习进度保留。');
+    const latest=await response.json(),en=document.documentElement.lang==='en';
+    return latest.version===release.version?(en?'Content and website are up to date.':'内容和网站已是最新版。'):(en?'A new release is preparing. Use Update website when it appears; your progress is preserved.':'发现新版，正在准备。更新按钮出现后点击启用；学习进度保留。');
+  };
   const notify=()=>{update.hidden=topUpdate.hidden=!registration.waiting;},watch=()=>{registration.installing?.addEventListener('statechange',notify);notify();};watch();registration.addEventListener('updatefound',watch);
   update.onclick=topUpdate.onclick=action(async()=>{if(!registration.waiting)return;if(storageTools?.busy||window.travelCanReload?.()===false){feedback.textContent='请先结束当前操作或存储管理，再更新网站。';return;}await manager.run(async()=>{navigator.serviceWorker.addEventListener('controllerchange',()=>location.reload(),{once:true});registration.waiting.postMessage('activate-update');});});
   manager.start();

@@ -1,5 +1,4 @@
-import { sha256 } from './crypto.js';
-import { VERSION_CACHE,AUDIO_CACHE,META_CACHE,audioCacheName,cachedAsset,isAudio } from './resource-cache.js';
+import { VERSION_CACHE,AUDIO_CACHE,META_CACHE,audioCacheName,cachedAsset,isAudio,assetHash } from './resource-cache.js';
 export const megabytes=bytes=>(bytes/1024/1024).toFixed(1)+' MB';
 export class OfflineStorage {
   constructor(release,base){this.release=release;this.base=base;this.current='language-room-multi-'+release.version;this.bundle=[...release.shell.filter(a=>a.path.startsWith('languages/')),...release.audio];this.bundleMap=new Map(this.bundle.map(a=>[a.path,a]));this.totalBytes=this.bundle.reduce((n,a)=>n+a.bytes,0);}
@@ -14,7 +13,7 @@ export class OfflineStorage {
     }
     // Small content-hash shards avoid requesting tens of thousands of Cache keys at once.
     for(const name of shards){const cache=await caches.open(name);for(const request of await cache.keys()){const url=new URL(request.url);if(url.origin!==this.base.origin||!url.pathname.startsWith(this.base.pathname+'audio/'))continue;tasks.push({name,asset:{path:url.pathname.slice(this.base.pathname.length)}});}}
-    let cursor=0;const worker=async()=>{while(cursor<tasks.length){const {name,asset}=tasks[cursor++],cache=await caches.open(name),response=await cache.match(new URL(asset.path,this.base));if(response){const data=await response.arrayBuffer(),digest=sha256(data),key=asset.path+'|'+digest;bytes+=data.byteLength;if(isAudio(asset))audioBytes+=data.byteLength;if(seen.has(key))duplicateBytes+=data.byteLength;else seen.add(key);const wanted=this.bundleMap.get(asset.path);if(wanted&&wanted.bytes===data.byteLength&&wanted.sha256===digest)available.set(asset.path,{...wanted,name});}checked++;if(checked%100===0)onProgress({checked,total:tasks.length,available:available.size});}};
+    let cursor=0;const worker=async()=>{while(cursor<tasks.length){const {name,asset}=tasks[cursor++],cache=await caches.open(name),response=await cache.match(new URL(asset.path,this.base));if(response){const data=await response.arrayBuffer(),digest=await assetHash(data),key=asset.path+'|'+digest;bytes+=data.byteLength;if(isAudio(asset))audioBytes+=data.byteLength;if(seen.has(key))duplicateBytes+=data.byteLength;else seen.add(key);const wanted=this.bundleMap.get(asset.path);if(wanted&&wanted.bytes===data.byteLength&&wanted.sha256===digest)available.set(asset.path,{...wanted,name});}checked++;if(checked%100===0)onProgress({checked,total:tasks.length,available:available.size});}};
     const results=await Promise.allSettled(Array.from({length:4},worker)),failed=results.find(r=>r.status==='rejected');if(failed)throw failed.reason;onProgress({checked,total:tasks.length,available:available.size});
     const savedBytes=[...available.values()].reduce((n,a)=>n+a.bytes,0),result={bytes,audioBytes,duplicateBytes,available,savedBytes,oldVersions:versions.filter(n=>n!==this.current).length,unknown:unknown.length,missing:this.bundle.filter(a=>!available.has(a.path))};await this.remember(available.size,savedBytes,result.missing.length===0);return result;
   }

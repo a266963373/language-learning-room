@@ -17,7 +17,8 @@ export class OfflineEngine {
     const document=this.document.languages[id];let pack=this.loadedPacks.get(id);
     if(!pack){const cache=await caches.open(this.cacheName),response=document.asset?await publicAsset(this.cacheName,this.base,document.asset,{fetcher:this.fetcher}):await cache.match(new URL(document.file,this.base));if(!response)throw new Error('这门语言的教材尚未离线保存，请联网重试。');pack=await response.json();}
     this.loadedPacks.delete(id);this.loadedPacks.set(id,pack);while(this.loadedPacks.size>2)this.loadedPacks.delete(this.loadedPacks.keys().next().value);
-    if(this.loadedLanguage)this.content.install(this.loadedLanguage,this.document.languages[this.loadedLanguage]);this.content.install(id,pack);this.document.audio=pack.audio;this.loadedLanguage=id;this.learning.recentWords.indexes.clear();
+    if(this.loadedLanguage)this.content.install(this.loadedLanguage,this.document.languages[this.loadedLanguage]);this.content.install(id,pack);this.document.audio=pack.audio;this.loadedLanguage=id;
+    for(const cachedId of this.learning.recentWords.indexes.keys())if(!this.loadedPacks.has(cachedId))this.learning.recentWords.indexes.delete(cachedId);
   }
   syncRuntimeParagraphs(){
     this.content.runtimeParagraphs=new Map(Object.entries(this.store.state.languages).map(([id,language])=>[id,Object.values(language.generatedParagraphs??{}).filter(entry=>this.content.runtimeParagraphValid(id,entry))]));
@@ -25,19 +26,19 @@ export class OfflineEngine {
   async refreshSelected(){const id=this.store.state.selectedLanguage;await this.ensureLanguage(id);this.syncRuntimeParagraphs();await this.learning.refreshContent(id);}
   async init() { await this.store.init(); await this.store.transaction(state=>initializeLearningState(state)); await this.refreshSelected();this.paragraphs=new ParagraphGeneration(this.store,this.content,this.learning); return this; }
   catalog() { return {providers:{paragraphGeneration:this.paragraphs.provider.info()},languages:Object.entries(this.document.languages).map(([id,pack])=>({id,...pack.info,availableStages:[1,2,3,4],...pack.counts,assessmentAvailable:Boolean(pack.assessment),version:pack.course.version,sources:[...pack.course.sources,...(pack.sentences.sources??[]),...(pack.paragraphs.sources??[])],audioNote:'音频逐条在线播放；可选下载离线包。'}))}; }
-  async audio(parsed,run=callback=>callback()){
+  async audio(parsed,run=callback=>callback(),signal){
     const id=knownLanguage(parsed.searchParams.get('languageId')),entryId=parsed.searchParams.get('entryId'),kind=parsed.searchParams.get('kind')||'word',sessionId=parsed.searchParams.get('sessionId'),taskId=parsed.searchParams.get('taskId'),example=parsed.searchParams.get('example');
     requireValue(['word','sentence'].includes(kind),'音频种类无效。');requireValue(!parsed.searchParams.has('example')||example==='1'&&kind==='sentence'&&sessionId&&taskId,'例句语音参数无效。');
     const validate=()=>example?this.learning.validateExampleAudio(id,entryId,sessionId,taskId):this.learning.validateAudioTask(id,entryId,sessionId,taskId);
     const record=await run(async()=>{await this.store.refresh();await this.ensureLanguage(id);this.syncRuntimeParagraphs();validate();const row=this.document.audio[`${entryId}:${kind}`];requireValue(row,'这项音频尚未准备。',404,'audio_unavailable');return row;});
-    const response=await publicAsset(this.cacheName,this.base,record,{save:false,fetcher:this.fetcher}),bytes=await response.arrayBuffer();
+    const response=await publicAsset(this.cacheName,this.base,record,{save:false,fetcher:this.fetcher,signal}),bytes=await response.arrayBuffer();
     await run(async()=>{await this.store.refresh();await this.ensureLanguage(id);validate();if(!example&&(kind==='word'||['recent-words','recent-paragraphs'].includes(this.store.state.sessions[sessionId]?.purpose)))await this.learning.audioReady(id,entryId,record.metadata,sessionId,taskId);});
     return new Response(bytes,{headers:{'Content-Type':record.type,'Cache-Control':'no-store'}});
   }
   async handle(url,options={}) {
     const parsed=new URL(url,this.base),path=parsed.pathname,method=options.method||'GET',data=()=>JSON.parse(options.body||'{}');
     try {
-      if(path==='/api/audio')return await this.audio(parsed,options.runLocal);
+      if(path==='/api/audio')return await this.audio(parsed,options.runLocal,options.signal);
       await this.store.refresh();let requested=this.store.state.selectedLanguage;
       if(method==='POST'&&path!=='/api/recording'){const row=data();requested=row.languageId??this.store.state.sessions[row.sessionId]?.languageId??requested;}
       if(method==='PATCH')requested=data().selectedLanguage??requested;
@@ -67,6 +68,9 @@ export class OfflineEngine {
         const id=randomUUID(),url=new URL(`local-recording/${id}`,this.base).href;
         result=await this.store.transaction(state=>{const session=state.sessions[sessionId];requireValue(session?.task?.id===taskId&&session.stage===4,'录音须关联当前输出题。',409,'task_conflict');const record={id,sessionId,taskId,type:blob.type,url,createdAt:this.learning.clock().toISOString()};state.recordings[id]=record;return record;},{id,blob});status=201;
       } else throw new HttpError(404,'not_found','此旅行版没有此接口。');
+      if(result?.task?.runtimeGenerated&&!this.document.audio[`${result.task.entryId}:sentence`]){
+        result.task.audio.sentence=null;result.task.deviceSpeech=true;
+      }
       return new Response(JSON.stringify(result),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
     } catch(error) { return new Response(JSON.stringify({error:{code:error.code||'offline_error',message:error.name==='QuotaExceededError'?'设备空间不足，请先备份并释放空间。':error.message}}),{status:error.status||500,headers:{'Content-Type':'application/json'}}); }
   }

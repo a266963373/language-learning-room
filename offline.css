@@ -7,7 +7,7 @@
 .offline-controls small { color:var(--muted); flex:1 0 100%; line-height:1.5; }
 .offline-controls button { min-height:44px; }
 .offline-status { color:var(--muted); font-size:13px; padding:10px 0; }
-.refresh-controls, #job-status { display:none !important; }
+
 #language { display:block; }
 @media (max-width:650px) { button,select { min-height:44px; } input,select,textarea { font-size:16px !important; } .app-shell { padding-left:max(14px,env(safe-area-inset-left)); padding-right:max(14px,env(safe-area-inset-right)); padding-bottom:env(safe-area-inset-bottom); } .top-actions { flex-wrap:wrap; } .ratings .rating { min-height:56px; } .helper-selects { flex-wrap:wrap; } }
 

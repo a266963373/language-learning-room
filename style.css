@@ -211,3 +211,10 @@ a { color: var(--green); }
 #play-word-example { min-height: 44px; margin-top: 6px; }
 #word-example-audio-status { display: block; margin-top: 6px; }
 @media(max-width: 650px) { .word-answer-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; } }
+.word-mnemonic { margin-top: 18px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); text-align: start; line-height: 1.7; overflow-wrap: anywhere; }
+.word-mnemonic h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.word-mnemonic h3 span { margin-inline-start: 8px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.word-mnemonic .mnemonic-cue { margin: 0 0 8px; font-size: 15px; }
+.mnemonic-cue > span { color: var(--muted); font-size: 12px; margin-inline-end: 5px; }
+.word-mnemonic .mnemonic-story { margin: 0; font-size: 15px; }
+.word-mnemonic .mnemonic-note, .mnemonic-pending { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }

@@ -1,3 +1,4 @@
+import {localize} from './locale.js';
 import { OfflineStorage,megabytes } from './storage.js';
 import { resourceLock } from './resource-cache.js';
 import { publicAsset } from './assets.js';
@@ -12,8 +13,8 @@ export function mountStorage({release,base,cache,registration,section,fetcher}){
   async function inspect(){const row=await storage.inspect(verifying);saved(row.available.size,row.savedBytes);get('storage-summary').textContent=`已核对资源文件 ${megabytes(row.bytes)}：音频 ${megabytes(row.audioBytes)}，程序/教材 ${megabytes(row.bytes-row.audioBytes)}；重复文件 ${megabytes(row.duplicateBytes)}。`;get('storage-details').textContent=`旧版本缓存 ${row.oldVersions} 个${row.unknown?`（其中 ${row.unknown} 个未完整安装）`:''}。文件内容大小与浏览器实际磁盘占用可能不同。`;get('verification-status').textContent='已有文件核对完成，没有为检查而重新下载。';get('verify-progress').hidden=true;if(!row.missing.length)await cache.put(new URL('offline-ready',base),new Response(release.version));else await cache.delete(new URL('offline-ready',base));await estimate();return row;}
   const action=callback=>async()=>{if(state.busy)return;try{await resourceLock(async()=>{busy(true);try{await callback();}finally{busy(false);}});}catch(error){message(error.name==='QuotaExceededError'?'存储空间不足，学习进度未清除。可先清理离线音频，再尝试整理。':error.message);}};
   get('inspect-storage').onclick=action(inspect);
-  get('clear-offline-audio').onclick=action(async()=>{await storage.guard(registration);if(!confirm('只清理本浏览器保存的离线音频。教材、学习进度、草稿、录音和登录状态保留；以后可在线播放或重新下载。确定清理？'))return;message('正在清理离线音频…');await storage.clearAudio();get('storage-summary').textContent='离线音频已清理，程序与教材保留。可再次检查剩余文件占用。';get('download-summary').textContent='离线音频已清理；进度、草稿、录音和登录状态未清除。';get('install-progress').hidden=true;await estimate();message('离线音频已清理，在线学习可继续。');});
-  get('compact-storage').onclick=action(async()=>{await storage.guard(registration);if(!confirm('先保留当前版本可复用的教材和音频，再删除过期版本与重复文件。学习进度、草稿、录音和登录状态保留。确定整理？'))return;message('正在保留可复用文件并整理旧缓存…');const result=await storage.compact(verifying);await inspect();message(`整理完成：移除 ${result.removedVersions} 个旧版本缓存，可复用音频保留一份。`);});
+  get('clear-offline-audio').onclick=action(async()=>{await storage.guard(registration);if(!confirm(localize('只清理本浏览器保存的离线音频。教材、学习进度、草稿、录音和登录状态保留；以后可在线播放或重新下载。确定清理？')))return;message('正在清理离线音频…');await storage.clearAudio();get('storage-summary').textContent='离线音频已清理，程序与教材保留。可再次检查剩余文件占用。';get('download-summary').textContent='离线音频已清理；进度、草稿、录音和登录状态未清除。';get('install-progress').hidden=true;await estimate();message('离线音频已清理，在线学习可继续。');});
+  get('compact-storage').onclick=action(async()=>{await storage.guard(registration);if(!confirm(localize('先保留当前版本可复用的教材和音频，再删除过期版本与重复文件。学习进度、草稿、录音和登录状态保留。确定整理？')))return;message('正在保留可复用文件并整理旧缓存…');const result=await storage.compact(verifying);await inspect();message(`整理完成：移除 ${result.removedVersions} 个旧版本缓存，可复用音频保留一份。`);});
   get('download-course').onclick=action(async()=>{
     let count=0,bytes=0,checked=false,newCount=0,newBytes=0,wake,checkpoint=Promise.resolve();
     const persist=()=>{const c=count,b=bytes;checkpoint=checkpoint.then(()=>storage.remember(c,b));};

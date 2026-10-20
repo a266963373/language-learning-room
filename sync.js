@@ -88,8 +88,8 @@ export class SupabaseSync {
   }
   // Network work never owns the learning lock. Only short snapshots/commits do.
   sync() {
-    if(this.inFlight)return this.inFlight;
-    const operation=this.networkRun(()=>this.syncLocked());this.inFlight=operation.finally(()=>{this.inFlight=null;});return this.inFlight;
+    if(this.inFlight){this.syncAgain=true;return this.inFlight;}
+    const operation=this.networkRun(async()=>{for(let round=0;round<3;round++){this.syncAgain=false;await this.syncLocked();if(!this.syncAgain)break;}});this.inFlight=operation.finally(()=>{this.inFlight=null;});return this.inFlight;
   }
   async syncLocked() {
     if(!this.configured){this.status('云同步等待配置；本机学习和备份可用。','unconfigured');return;}
@@ -111,13 +111,13 @@ export class SupabaseSync {
       }
       const recordings=equal(merged,local)?null:await this.downloadRecordings(merged);
       // Typing may continue while requests are in flight. Do not discard a new draft.
-      if(!equal(local,await this.run(()=>this.snapshot()))||!this.canApply()){this.status('本机已保存 · 操作结束后继续同步');this.schedule();return;}
+      if(!equal(local,await this.run(()=>this.snapshot()))||!this.canApply()){this.status('本机已保存 · 操作结束后继续同步');this.syncAgain=this.canApply();this.schedule();return;}
       let revision=remote.revision;
       if(!equal(merged,remote.payload)) {
         // First save any remote-only blobs locally without replacing the state.
         if(recordings){const tx=this.engine.store.db.transaction('recordings','readwrite');for(const row of recordings)tx.objectStore('recordings').put(row.blob,row.id);await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});}
         await this.uploadRecordings(merged,remote.payload);
-        if(!equal(local,await this.run(()=>this.snapshot()))){this.status('本机已保存 · 继续同步最新进度');this.schedule();return;}
+        if(!equal(local,await this.run(()=>this.snapshot()))){this.status('本机已保存 · 继续同步最新进度');this.syncAgain=this.canApply();this.schedule();return;}
         const response=await this.writeRemote(remote.revision,merged);
         if(response.conflict)continue;revision=response.revision;
       }
@@ -129,7 +129,7 @@ export class SupabaseSync {
           // Remember both the accepted cloud snapshot and its local parent.
           // A grade during an upload is rebased next time, never overwritten.
           await this.meta(`sync-base:${uid}`,{revision,payload:merged,...(changed?{localBase:local}:{})});
-          this.status('云端已接收进度 · 当前操作结束后继续合并');this.schedule();return false;
+          this.status('云端已接收进度 · 当前操作结束后继续合并');this.syncAgain=this.canApply();this.schedule();return false;
         }
         if(changed)await this.apply(merged,recordings);
         await this.meta(`sync-base:${uid}`,{revision,payload:merged});await this.meta('sync-owner',uid);return true;
