@@ -39,4 +39,9 @@ export async function readBackup(file,engine) {
   for(const row of payload.recordings){check(uuid.test(row.id)&&!seen.has(row.id)&&Object.hasOwn(payload.state.recordings,row.id)&&typeof row.data==='string'&&row.data.length<=12*1024*1024,'备份录音无效。');seen.add(row.id);const bytes=Uint8Array.from(atob(row.data),char=>char.charCodeAt(0));check(bytes.length>0&&bytes.length<=8*1024*1024&&sha256(bytes)===row.sha256&&row.type===payload.state.recordings[row.id].type,'备份录音校验失败。');recordings.push({id:row.id,blob:new Blob([bytes],{type:row.type})});}
   return {...normalize(payload,engine.base),recordings};
 }
-export async function restoreBackup(engine,payload) {await engine.store.restore(payload.state,payload.recordings);window.multiOffline.restoring=true;localStorage.setItem('multi-offline-ui',JSON.stringify(payload.ui));localStorage.setItem('multi-offline-import-id',crypto.randomUUID());await engine.refreshSelected();}
+export async function restoreBackup(engine,payload) {
+  await engine.store.restore(payload.state,payload.recordings);window.multiOffline.restoring=true;
+  localStorage.setItem('multi-offline-ui',JSON.stringify(payload.ui));
+  localStorage.setItem('multi-offline-last-import',JSON.stringify({at:new Date().toISOString(),reviews:Object.values(payload.state.languages).reduce((sum,language)=>sum+language.reviews.length,0),recordings:payload.recordings.length}));
+  localStorage.setItem('multi-offline-import-id',crypto.randomUUID());await engine.refreshSelected();
+}
