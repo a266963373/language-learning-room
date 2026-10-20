@@ -8,17 +8,18 @@ export function knownStage(stage) { requireValue(Number.isInteger(stage)&&stage>
 const sentenceKey=text=>text.normalize('NFKC').toLocaleLowerCase('und').replace(/[\p{P}\p{S}\s_]+/gu,'');
 export class OfflineContent {
   constructor(document) {
-    this.document=document; this.packs=new Map(); this.assessments=new Map(); this.sentencePacks=new Map(); this.paragraphPacks=new Map(); this.indexes=new Map();this.stageCache=new Map();
+    this.document=document; this.packs=new Map(); this.assessments=new Map(); this.assessmentViews=new Map(); this.sentencePacks=new Map(); this.paragraphPacks=new Map(); this.indexes=new Map();this.stageCache=new Map();
     for(const [id,pack] of Object.entries(document.languages)) {
       this.packs.set(id,pack.course);
       if(pack.assessment)this.assessments.set(id,validateAssessment(pack.assessment,id));
+      this.assessmentViews.set(id,new Map((pack.assessmentDisplay??assessmentEntries(pack.assessment)).map(entry=>[entry.id,entry])));
       this.sentencePacks.set(id,pack.sentences); this.paragraphPacks.set(id,pack.paragraphs);
-      this.indexes.set(id,new Map([...pack.course.entries,...assessmentEntries(pack.assessment),...pack.sentences.entries,...pack.paragraphs.entries].map(entry=>[entry.id,entry])));
+      this.indexes.set(id,new Map([...pack.course.entries,...this.assessmentViews.get(id).values(),...pack.sentences.entries,...pack.paragraphs.entries].map(entry=>[entry.id,entry])));
     }
   }
   pack(id) { knownLanguage(id); return this.packs.get(id); }
   install(id,pack) {
-    this.packs.set(id,pack.course);this.sentencePacks.set(id,pack.sentences);this.paragraphPacks.set(id,pack.paragraphs);this.indexes.set(id,new Map([...pack.course.entries,...this.assessmentEntries(id),...pack.sentences.entries,...pack.paragraphs.entries].map(entry=>[entry.id,entry])));this.stageCache.clear();
+    this.packs.set(id,pack.course);this.sentencePacks.set(id,pack.sentences);this.paragraphPacks.set(id,pack.paragraphs);this.indexes.set(id,new Map([...pack.course.entries,...this.assessmentViews.get(id).values(),...pack.sentences.entries,...pack.paragraphs.entries].map(entry=>[entry.id,entry])));this.stageCache.clear();
   }
   assessment(id) { knownLanguage(id); return this.assessments.get(id); }
   assessmentEntries(id) { return assessmentEntries(this.assessment(id)); }
@@ -37,7 +38,7 @@ export class OfflineContent {
     }return true;}catch{return false;}
   }
   entry(id,entryId) { knownLanguage(id); const entry=this.indexes.get(id).get(entryId)??this.paragraphs(id).find(entry=>entry.id===entryId); if(!entry)throw new HttpError(404,'entry_not_found','词句未发布或不存在。'); return entry; }
-  assistance(id,entry) { knownLanguage(id); return entry; }
+  assistance(id,entry) { knownLanguage(id);const display=this.assessmentViews.get(id).get(entry?.id);return display?{...entry,...display}:entry; }
   eligible(id,stage) {
     const key=`${id}:${stage}`;if(this.stageCache.has(key))return this.stageCache.get(key);
     const pack=this.document.languages[knownLanguage(id)],words=this.packs.get(id).entries;
