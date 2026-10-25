@@ -7,6 +7,7 @@ import { arabicDisplay } from './arabic-vowels.js';
 import { arabicTransliteration } from './arabic-transliteration.js';
 import { mnemonicMarkup, mnemonicCoverage } from './word-mnemonics.js';
 import { DeviceSpeech } from './device-speech.js';
+import { renderPracticeMarkup, renderExampleMarkup } from './practice-motion.js';
 const deviceSpeech=new DeviceSpeech();
 
 const $ = selector => document.querySelector(selector);
@@ -198,7 +199,7 @@ async function loadWordExample(){
   try{const result=await request(`/api/word-example?${new URLSearchParams({sessionId:session.sessionId,taskId:task().id})}`);
     if(key!==itemKey()||!revealed)return;exampleState={key,status:'ready',example:result.example};
   }catch{if(key!==itemKey()||!revealed)return;exampleState={key,status:'error'};}
-  if($('#word-example'))$('#word-example').innerHTML=wordExampleMarkup();
+  renderExampleMarkup($('#word-example'),wordExampleMarkup());
 }
 async function playWordExample(){
   deviceSpeech.stop();
@@ -220,7 +221,7 @@ function hanjaMarkup(item=task()) {
 
 function targetWithHanja(markup) {
   const hanja=revealed?hanjaMarkup():'';
-  return hanja?`<div class="target-with-hanja ${Number(task()?.practiceStage || task()?.stage)<=2?'hanja-under-word':''}">${markup}${hanja}</div>`:markup;
+  return `<div class="target-with-hanja ${Number(task()?.practiceStage || task()?.stage)<=2?'hanja-under-word':''}">${markup}${hanja}</div>`;
 }
 
 function audioMarkup(kind) {
@@ -236,6 +237,13 @@ function correctOptionIndex() {
   const value = task()?.correctOption;
   if (typeof value === 'number' && value >= 0 && value < options.length) return value;
   return options.findIndex((option, index) => getOptionId(option, index) === value || getOptionText(option) === value);
+}
+
+function wordCueMarkup(item) {
+  if (state.selectedLanguage !== 'ja') return targetMarkup(item.display);
+  const parts = item.japaneseReadings?.[item.display];
+  const reading = Array.isArray(parts) && parts.some(part=>part.reading) ? parts.map(part=>part.reading || part.text).join('') : '';
+  return `<span class="word-surface">${esc(item.display)}</span><span class="word-reading"${!revealed?' aria-hidden="true"':''}>${revealed?esc(reading):''}</span>`;
 }
 
 function renderPractice() {
@@ -277,7 +285,7 @@ function renderPractice() {
     if (revealed) answer = `<div class="answer"><p class="answer-label">${esc(recognition ? t('correct') : t('checkSpelling'))}</p>${targetWithHanja(`<p class="target-text" lang="${esc(state.selectedLanguage)}" dir="${direction}">${targetMarkup(item.display)}</p>`)}${translatedMarkup(item.meanings)}</div>`;
   } else if (stage === 2) {
     const reverse = item.mode === 'reverse';
-    center = reverse ? translatedMarkup(item.meanings) : `${targetWithHanja(`<h1 class="target-text" lang="${esc(state.selectedLanguage)}" dir="${direction}"><button type="button" class="word-link" data-entry="${esc(item.entryId)}">${targetMarkup(item.display)}</button></h1>`)}${audioMarkup('word')}`;
+    center = reverse ? translatedMarkup(item.meanings) : `<div class="word-cue-slot">${targetWithHanja(`<h1 class="target-text" lang="${esc(state.selectedLanguage)}" dir="${direction}"><button type="button" class="word-link" data-entry="${esc(item.entryId)}">${wordCueMarkup(item)}</button></h1>`)}</div>${audioMarkup('word')}`;
     if (revealed) answer = `<div class="answer">${reverse ? `${targetWithHanja(`<p class="target-text" lang="${esc(state.selectedLanguage)}" dir="${direction}">${targetMarkup(item.display)}</p>`)}${audioMarkup('word')}` : translatedMarkup(item.meanings)}</div>`;
   } else if (stage === 3) {
     meta = `<select id="input-mode" aria-label="Input display"><option value="together" ${!listenFirst ? 'selected' : ''}>${esc(t('together'))}</option><option value="listen" ${listenFirst ? 'selected' : ''}>${esc(t('listenFirst'))}</option></select>`;
@@ -290,7 +298,7 @@ function renderPractice() {
   }
   if(revealed&&stage<=2){center+=mnemonicMarkup(item,state.selectedLanguage,uiLanguage);answer=`<div class="word-answer-layout">${answer}<aside id="word-example" class="word-example" aria-label="${esc(uiLanguage==='zh'?'这个词怎么用':'Word usage example')}">${wordExampleMarkup()}</aside></div>`;}
   center=`<section class="practice-question">${center}</section>`;
-  $('#practice').innerHTML = `<div class="practice-meta"><span>${esc(item.purpose==='recent-paragraphs' ? (uiLanguage==='zh'?(item.sentence?.provenance?.generator==='rules'?'本地规则小段落 · 语音可选':'词汇小段落 · 语音可选'):(item.sentence?.provenance?.generator==='rules'?'Local rule passage · optional audio':'Vocabulary passage · optional audio')) : item.purpose==='recent-words' ? (uiLanguage==='zh'?'近期词 · 已配音短句':'Recent words · voiced sentences') : item.purpose==='assessment' ? (uiLanguage==='zh'?'词汇量校准 · 揭晓前回忆词义':'Vocabulary calibration · recall meaning before reveal') : item.variant?.startsWith('word-meaning-') ? (uiLanguage === 'zh' ? `${item.isReview ? '词义复习' : '词义抽查'} · 在揭晓前回忆意思` : `Word-meaning ${item.isReview ? 'review' : 'check'} · recall before revealing`) : strings[uiLanguage].stages[stage - 1])}</span>${meta}</div><div class="card-center" tabindex="0" role="region" aria-label="${esc(uiLanguage==='zh'?'题目与答案':'Question and answer')}">${center}${answer || '<div class="answer-placeholder" aria-hidden="true"></div>'}</div><div class="actions">${revealed ? `<div class="ratings">${t('ratings').map((label, index) => `<button type="button" class="rating" data-rating="${index + 1}"><kbd>${index + 1}</kbd><span>${esc(label)}</span></button>`).join('')}</div>` : `<button type="button" id="reveal" class="primary">${esc(t('reveal'))} <span aria-hidden="true">␣</span></button>`}</div>`;
+  renderPracticeMarkup($('#practice'), `<div class="practice-meta"><span>${esc(item.purpose==='recent-paragraphs' ? (uiLanguage==='zh'?(item.sentence?.provenance?.generator==='rules'?'本地规则小段落 · 语音可选':'词汇小段落 · 语音可选'):(item.sentence?.provenance?.generator==='rules'?'Local rule passage · optional audio':'Vocabulary passage · optional audio')) : item.purpose==='recent-words' ? (uiLanguage==='zh'?'近期词 · 已配音短句':'Recent words · voiced sentences') : item.purpose==='assessment' ? (uiLanguage==='zh'?'词汇量校准 · 揭晓前回忆词义':'Vocabulary calibration · recall meaning before reveal') : item.variant?.startsWith('word-meaning-') ? (uiLanguage === 'zh' ? `${item.isReview ? '词义复习' : '词义抽查'} · 在揭晓前回忆意思` : `Word-meaning ${item.isReview ? 'review' : 'check'} · recall before revealing`) : strings[uiLanguage].stages[stage - 1])}</span>${meta}</div><div class="card-center" tabindex="0" role="region" aria-label="${esc(uiLanguage==='zh'?'题目与答案':'Question and answer')}">${center}${answer || '<div class="answer-placeholder" aria-hidden="true"></div>'}</div><div class="actions">${revealed ? `<div class="ratings">${t('ratings').map((label, index) => `<button type="button" class="rating" data-rating="${index + 1}"><kbd>${index + 1}</kbd><span>${esc(label)}</span></button>`).join('')}</div>` : `<button type="button" id="reveal" class="primary">${esc(t('reveal'))} <span aria-hidden="true">␣</span></button>`}</div>`, itemKey(), revealed, `${state.selectedLanguage}:${stage}`);
   if(revealed&&stage<=2){const key=itemKey();requestAnimationFrame(()=>setTimeout(()=>{if(key===itemKey()&&revealed)void loadWordExample();},0));}
   $('#practice .card-center').scrollTop = previousScroll;
   setBusy(busy);
@@ -306,17 +314,8 @@ function showPracticeTop() {
 }
 
 function showAnswer() {
-  const answer = $('#practice .answer');
-  if (!answer) return;
-  showPracticeTop();
-  const content = $('#practice .card-center');
-  const viewport = content.getBoundingClientRect();
-  const bounds = answer.getBoundingClientRect();
-  // Keep the question still when the beginning of the answer is already visible.
-  // Long prompts reveal inside the frame; the page and action row stay in place.
-  if (bounds.top < viewport.top || bounds.top + Math.min(80, bounds.height) > viewport.bottom) {
-    content.scrollTop += bounds.top - viewport.top - 6;
-  }
+  // Revealing keeps the learner's current reading position; only a new task
+  // uses showPracticeTop() to return from a long page to its question.
 }
 
 function cleanupMedia() {

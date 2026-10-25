@@ -41,7 +41,7 @@ progress::-moz-progress-bar { background: var(--progress); }
 .adaptive-step[data-reached="true"]::before { background: var(--adaptive-reached); }
 .adaptive-limit { margin: 10px 0 0; font-size: 11px; line-height: 1.6; color: var(--warning); }
 .practice { background: var(--white); border: 1px solid var(--line); border-radius: 20px; height: clamp(400px, calc(100vh - 180px), 600px); height: clamp(400px, calc(100svh - 180px), 600px); padding: 22px 30px; display: grid; grid-template-rows: 44px minmax(0, 1fr) 74px; gap: 12px; scroll-margin-top: 16px; }
-.practice[aria-busy="true"] { opacity: .65; }
+.practice[aria-busy="true"] { opacity: 1; }
 .practice-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; min-height: 0; overflow: auto; }
 .practice-meta select { padding: 6px 9px; font-size: 12px; }
 .card-center { min-height: 0; min-width: 0; padding: 6px 4px; display: flex; align-items: center; flex-direction: column; gap: 12px; text-align: center; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; }
@@ -228,7 +228,7 @@ a { color: var(--green); }
 .practice-question > * { max-width: 100%; }
 .practice-question > .panel-note { margin-block: 4px; }
 .practice-question .word-mnemonic { width: 100%; margin-top: 12px; }
-.revealed-practice .card-center { justify-content: flex-start; }
+.practice .card-center { justify-content: flex-start; }
 .revealed-practice .answer { margin: 0; }
 .word-answer-layout { align-items: start; gap: 20px; }
 .word-answer-layout > .answer { border-top: 0; padding-top: 0; }
@@ -237,9 +237,9 @@ a { color: var(--green); }
 .example-note { line-height: 1.55; }
 .word-mnemonic { line-height: 1.6; }
 @media (min-width: 1000px) {
-  .revealed-practice .card-center { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 26px; align-items: start; text-align: start; }
-  .revealed-practice.word-practice .card-center { grid-template-columns: minmax(230px, .8fr) minmax(0, 2.2fr); }
-  .revealed-practice .practice-question { padding: 8px 0; }
+  .practice .card-center { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 26px; align-items: start; text-align: start; }
+  .practice.word-practice .card-center { grid-template-columns: minmax(230px, .8fr) minmax(0, 2.2fr); }
+  .practice .practice-question { padding: 8px 0; }
   .revealed-practice .card-center > .answer { border-top: 0; border-inline-start: 1px solid var(--line); padding: 8px 0 8px 24px; }
   .word-answer-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); }
   .word-answer-layout > .answer { border-inline-start: 1px solid var(--line); padding-inline-start: 20px; }
@@ -247,17 +247,36 @@ a { color: var(--green); }
   .word-practice .word-mnemonic .mnemonic-cue, .word-practice .word-mnemonic .mnemonic-story { font-size: 14px; }
 }
 @media (min-width: 651px) and (max-width: 999px) {
-  .revealed-practice .practice-question { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; align-items: center; }
-  .revealed-practice .practice-question > .word-mnemonic { grid-column: 2; grid-row: 1 / span 4; margin: 0; }
-  .revealed-practice .practice-question > :not(.word-mnemonic) { grid-column: 1; justify-self: center; }
+  .word-practice .practice-question { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; align-items: center; }
+  .word-practice .practice-question > .word-mnemonic { grid-column: 2; grid-row: 1 / span 4; margin: 0; }
+  .word-practice .practice-question > :not(.word-mnemonic):not(.mnemonic-pending) { grid-column: 1; justify-self: center; }
 }
 @media (max-width: 650px) {
-  .practice { min-height: 400px; padding: 14px; grid-template-rows: auto auto 64px; gap: 14px; }
+  .practice { min-height: 400px; padding: 14px; grid-template-rows: 32px auto 64px; gap: 14px; }
   .practice-meta { min-height: 32px; }
   .ratings { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
   .rating { padding: 10px 8px; }
   .word-answer-layout { gap: 14px; }
-  .word-practice.revealed-practice .practice-question { display: contents; }
+  .word-practice .practice-question { display: contents; }
   .word-practice .word-answer-layout { order: 1; }
   .word-practice .word-mnemonic, .word-practice .mnemonic-pending { order: 2; }
 }
+
+/* Keep the cue and controls anchored; only newly supplied information fades. */
+.word-practice .practice-question > .word-cue-slot { min-height: 116px; width: 100%; text-align: center; }
+.word-reading { display: block; min-height: 27px; font-size: 18px; line-height: 1.5; color: var(--muted); letter-spacing: normal; font-weight: 400; }
+.actions #reveal { min-height: 64px; }
+.word-example { min-height: 300px; }
+button { transition: background .15s, opacity .12s; }
+.practice-ghost { pointer-events: none !important; user-select: none; overflow: hidden; contain: paint; z-index: 4; background: var(--white); }
+.practice-ghost * { pointer-events: none !important; }
+@media (min-width: 651px) and (max-width: 999px) {
+  .word-practice .practice-question > .mnemonic-pending { grid-column: 2; grid-row: 1 / span 4; margin: 0; }
+}
+@media (max-width: 650px) {
+  .word-practice .practice-question > .word-cue-slot { min-height: 108px; }
+  .word-example { min-height: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .practice-ghost { display: none; } }
+
+.word-cue-slot .word-link { display: block; width: 100%; }
