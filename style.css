@@ -144,7 +144,7 @@ a { color: var(--green); }
 .undo-controls { margin-top: 14px; text-align: center; }
 .undo-controls button:disabled { opacity: .4; }
 .review-controls { margin: 0 0 18px; }
-.review-controls:not([hidden]) ~ .practice { height: clamp(400px, calc(100svh - 340px), 600px); }
+.review-controls:not([hidden]) ~ .practice { height: auto; min-height: clamp(400px, calc(100svh - 340px), 620px); }
 .practice .empty { max-height: 100%; overflow-y: auto; width: 100%; }
 .review-controls > p { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
 .review-mode-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -218,3 +218,46 @@ a { color: var(--green); }
 .mnemonic-cue > span { color: var(--muted); font-size: 12px; margin-inline-end: 5px; }
 .word-mnemonic .mnemonic-story { margin: 0; font-size: 15px; }
 .word-mnemonic .mnemonic-note, .mnemonic-pending { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+
+/* Use the viewport for recall and its answer, with no clipped inner panel.
+   Unusually long text and narrow screens can grow the document naturally. */
+.app-shell { width: min(1640px, 100%); padding-inline: clamp(18px, 3vw, 44px); }
+.practice { height: auto; min-height: clamp(400px, calc(100svh - 200px), 620px); grid-template-rows: 32px auto 64px; padding: 20px 26px; gap: 16px; }
+.card-center { overflow: visible; scrollbar-gutter: auto; padding: 4px 0; }
+.practice-question { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; min-width: 0; }
+.practice-question > * { max-width: 100%; }
+.practice-question > .panel-note { margin-block: 4px; }
+.practice-question .word-mnemonic { width: 100%; margin-top: 12px; }
+.revealed-practice .card-center { justify-content: flex-start; }
+.revealed-practice .answer { margin: 0; }
+.word-answer-layout { align-items: start; gap: 20px; }
+.word-answer-layout > .answer { border-top: 0; padding-top: 0; }
+.word-answer-layout .helper-translation .answer-text { font-size: 20px; line-height: 1.55; }
+.word-example { padding: 14px 16px; }
+.example-note { line-height: 1.55; }
+.word-mnemonic { line-height: 1.6; }
+@media (min-width: 1000px) {
+  .revealed-practice .card-center { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 26px; align-items: start; text-align: start; }
+  .revealed-practice.word-practice .card-center { grid-template-columns: minmax(230px, .8fr) minmax(0, 2.2fr); }
+  .revealed-practice .practice-question { padding: 8px 0; }
+  .revealed-practice .card-center > .answer { border-top: 0; border-inline-start: 1px solid var(--line); padding: 8px 0 8px 24px; }
+  .word-answer-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); }
+  .word-answer-layout > .answer { border-inline-start: 1px solid var(--line); padding-inline-start: 20px; }
+  .word-practice .word-mnemonic { padding: 12px 14px; }
+  .word-practice .word-mnemonic .mnemonic-cue, .word-practice .word-mnemonic .mnemonic-story { font-size: 14px; }
+}
+@media (min-width: 651px) and (max-width: 999px) {
+  .revealed-practice .practice-question { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; align-items: center; }
+  .revealed-practice .practice-question > .word-mnemonic { grid-column: 2; grid-row: 1 / span 4; margin: 0; }
+  .revealed-practice .practice-question > :not(.word-mnemonic) { grid-column: 1; justify-self: center; }
+}
+@media (max-width: 650px) {
+  .practice { min-height: 400px; padding: 14px; grid-template-rows: auto auto 64px; gap: 14px; }
+  .practice-meta { min-height: 32px; }
+  .ratings { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .rating { padding: 10px 8px; }
+  .word-answer-layout { gap: 14px; }
+  .word-practice.revealed-practice .practice-question { display: contents; }
+  .word-practice .word-answer-layout { order: 1; }
+  .word-practice .word-mnemonic, .word-practice .mnemonic-pending { order: 2; }
+}
